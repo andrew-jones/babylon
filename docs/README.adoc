@@ -28,6 +28,9 @@ This comprehensive technical documentation covers the Babylon platform, an enter
   ** link:components/apis/catalog-api.adoc[Catalog API] - Service catalog backend
   ** link:components/apis/admin-api.adoc[Admin API] - Administrative functions and incident management
   ** link:components/apis/ratings-api.adoc[Ratings API] - User feedback and bookmarking system
+  ** link:components/apis/babylon-api.adoc[Babylon API] - Workshop and catalog item management through Kubernetes CRDs
+  ** link:components/apis/anarchy-api.adoc[Anarchy API] - Workflow automation and infrastructure orchestration through Kubernetes CRDs
+  ** link:components/apis/poolboy-api.adoc[Poolboy API] - Resource lifecycle management through Kubernetes CRDs
 * link:components/uis/README.adoc[User Interfaces]
   ** link:components/uis/catalog-ui.adoc[Catalog UI] - Service catalog frontend
   ** link:components/uis/admin-ui.adoc[Admin UI] - Administrative interface
@@ -56,9 +59,9 @@ This comprehensive technical documentation covers the Babylon platform, an enter
 
 === User Guides
 * link:user-guides/README.adoc[User Guides Overview]
-  ** link:user-guides/administrators.adoc[Administrator Guide] - Platform administration and configuration
-  ** link:user-guides/instructors.adoc[Instructor Guide] - Workshop creation and management
-  ** link:user-guides/end-users.adoc[End User Guide] - Requesting and accessing lab environments
+  ** link:user-guides/administrator-guide.adoc[Administrator Guide] - Platform administration and configuration
+  ** link:user-guides/instructor-guide.adoc[Instructor Guide] - Workshop creation and management
+  ** link:user-guides/end-user-guide.adoc[End User Guide] - Requesting and accessing lab environments
 
 === Configuration Reference
 * link:configuration/README.adoc[Configuration Reference] - Complete configuration documentation
@@ -75,9 +78,9 @@ For new users, we recommend following this documentation path:
 2. Review the link:architecture/README.adoc[Architecture Overview] to understand system design
 3. Follow the link:deployment/README.adoc[Deployment Guide] for installation
 4. Consult the appropriate user guide based on your role:
-   - link:user-guides/administrators.adoc[Administrator Guide] for platform operators
-   - link:user-guides/instructors.adoc[Instructor Guide] for workshop creators
-   - link:user-guides/end-users.adoc[End User Guide] for lab participants
+   - link:user-guides/administrator-guide.adoc[Administrator Guide] for platform operators
+   - link:user-guides/instructor-guide.adoc[Instructor Guide] for workshop creators
+   - link:user-guides/end-user-guide.adoc[End User Guide] for lab participants
 
 == Getting Help
 
