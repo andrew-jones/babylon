@@ -24,6 +24,9 @@ REST APIs and backend services that provide functionality to user interfaces and
 * **link:apis/catalog-api.adoc[Catalog API]**: Service catalog backend with resource management
 * **link:apis/admin-api.adoc[Admin API]**: Administrative functions and incident management
 * **link:apis/ratings-api.adoc[Ratings API]**: User feedback and bookmarking system
+* **link:apis/babylon-api.adoc[Babylon API]**: Workshop and catalog item management through Kubernetes CRDs
+* **link:apis/anarchy-api.adoc[Anarchy API]**: Workflow automation and infrastructure orchestration through Kubernetes CRDs
+* **link:apis/poolboy-api.adoc[Poolboy API]**: Resource lifecycle management through Kubernetes CRDs
 
 === User Interfaces
 Web-based interfaces for different user personas:

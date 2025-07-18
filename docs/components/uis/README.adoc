@@ -6,14 +6,9 @@ The Babylon Platform provides modern, responsive web interfaces that enable diff
 
 == Interface Categories
 
-=== End User Interfaces
+=== User Interfaces
 * **link:catalog-ui.adoc[Catalog UI]**: Service catalog frontend for browsing and requesting resources
-* **link:workshop-ui.adoc[Workshop UI]**: Workshop participant interface for lab access and guidance
-* **link:status-ui.adoc[Status UI]**: System status and health information
-
-=== Administrative Interfaces
 * **link:admin-ui.adoc[Admin UI]**: Comprehensive administrative interface for platform operators
-* **link:workshop-manager-ui.adoc[Workshop Manager UI]**: Workshop orchestration and user management
 
 == UI Architecture Patterns
 
