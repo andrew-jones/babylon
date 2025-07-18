@@ -397,7 +397,7 @@ POST /apis/babylon.gpte.redhat.com/v1/namespaces/{namespace}/workshops
   "spec": {
     "displayName": "Advanced Kubernetes Workshop - January 2024",
     "description": "Intensive advanced Kubernetes workshop covering operators, networking, and security",
-    "accessPassword": "k8s-advanced-2024",
+    "accessPassword": "k8s-advanced-2024", # notsecret
     "openRegistration": true,
     "lifespan": {
       "start": "2024-01-15T09:00:00Z",
