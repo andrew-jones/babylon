@@ -1,3 +1,92 @@
-== Project Babylon documentation
+= Babylon Platform Technical Documentation
 
-* Start with link:Deploying_Babylon.adoc[Deploying Babylon Suite of Components]
+This comprehensive technical documentation covers the Babylon platform, an enterprise-grade cloud-native platform built on Kubernetes/OpenShift that provides workshop management, infrastructure provisioning, and self-service capabilities.
+
+== Documentation Structure
+
+=== Executive Overview
+* link:executive-overview.adoc[Executive Overview] - Platform purpose, business value, and capabilities
+
+=== Architecture Documentation
+* link:architecture/README.adoc[Architecture Overview] - High-level system architecture and component relationships
+* link:architecture/data-flows.adoc[Data Flow Diagrams] - Request lifecycle and component interactions
+* link:architecture/security-model.adoc[Security Model] - RBAC, service accounts, and secrets management
+* link:architecture/integration-points.adoc[Integration Points] - External system integrations
+
+=== Component Deep-Dive
+* link:components/README.adoc[Components Overview] - Complete component inventory
+* link:components/operators/README.adoc[Core Operators]
+  ** link:components/operators/agnosticv-operator.adoc[AgnosticV Operator] - Catalog management and AgnosticD integration
+  ** link:components/operators/anarchy-operator.adoc[Anarchy Operator] - Stateless automation and workflow management
+  ** link:components/operators/poolboy-operator.adoc[Poolboy Operator] - Resource pooling and lifecycle management
+  ** link:components/operators/workshop-manager.adoc[Workshop Manager] - Workshop orchestration and user assignment
+  ** link:components/operators/lab-ui-manager.adoc[Lab UI Manager] - Dynamic lab interface deployment
+  ** link:components/operators/cost-tracker.adoc[Cost Tracker] - AWS cost monitoring and allocation
+  ** link:components/operators/catalog-manager.adoc[Catalog Manager] - Catalog item lifecycle management
+  ** link:components/operators/notifier.adoc[Notifier] - Event-driven notification system
+* link:components/apis/README.adoc[APIs and Services]
+  ** link:components/apis/catalog-api.adoc[Catalog API] - Service catalog backend
+  ** link:components/apis/admin-api.adoc[Admin API] - Administrative functions and incident management
+  ** link:components/apis/ratings-api.adoc[Ratings API] - User feedback and bookmarking system
+* link:components/uis/README.adoc[User Interfaces]
+  ** link:components/uis/catalog-ui.adoc[Catalog UI] - Service catalog frontend
+  ** link:components/uis/admin-ui.adoc[Admin UI] - Administrative interface
+
+=== Deployment and Operations
+* link:deployment/README.adoc[Deployment Guide] - Complete installation procedures
+  ** link:deployment/prerequisites.adoc[Prerequisites] - Infrastructure and dependency requirements
+  ** link:deployment/installation.adoc[Installation] - Step-by-step Helm deployment
+  ** link:deployment/configuration.adoc[Configuration] - Environment-specific settings
+  ** link:deployment/verification.adoc[Post-Installation Verification] - Testing and validation
+* link:operations/README.adoc[Operations Guide] - Day-2 operations and maintenance
+  ** link:operations/monitoring.adoc[Monitoring and Alerting] - Observability setup
+  ** link:operations/backup-recovery.adoc[Backup and Disaster Recovery] - Data protection procedures
+  ** link:operations/scaling.adoc[Scaling and Capacity Planning] - Performance optimization
+  ** link:operations/security.adoc[Security Hardening] - Production security recommendations
+  ** link:operations/troubleshooting.adoc[Troubleshooting] - Common issues and solutions
+  ** link:operations/logging.adoc[Log Management] - Aggregation and analysis
+
+=== Developer Guide
+* link:development/README.adoc[Developer Guide] - Complete development workflows
+  ** link:development/local-setup.adoc[Local Development Setup] - Environment preparation
+  ** link:development/component-development.adoc[Component Development] - Individual component workflows
+  ** link:development/testing.adoc[Testing Strategies] - Unit, integration, and end-to-end testing
+  ** link:development/api-integration.adoc[API Integration] - REST APIs and Kubernetes patterns
+  ** link:development/extension-points.adoc[Extension Points] - Customization and plugin development
+
+=== User Guides
+* link:user-guides/README.adoc[User Guides Overview]
+  ** link:user-guides/administrators.adoc[Administrator Guide] - Platform administration and configuration
+  ** link:user-guides/instructors.adoc[Instructor Guide] - Workshop creation and management
+  ** link:user-guides/end-users.adoc[End User Guide] - Requesting and accessing lab environments
+
+=== Configuration Reference
+* link:configuration/README.adoc[Configuration Reference] - Complete configuration documentation
+  ** link:configuration/helm-values.adoc[Helm Values Reference] - Complete values.yaml documentation
+  ** link:configuration/environment-variables.adoc[Environment Variables] - Runtime configuration options
+  ** link:configuration/crds.adoc[Custom Resource Definitions] - CRD specifications and examples
+  ** link:configuration/integration-templates.adoc[Integration Templates] - External system configuration
+
+== Quick Start
+
+For new users, we recommend following this documentation path:
+
+1. Read the link:executive-overview.adoc[Executive Overview] to understand the platform's purpose and capabilities
+2. Review the link:architecture/README.adoc[Architecture Overview] to understand system design
+3. Follow the link:deployment/README.adoc[Deployment Guide] for installation
+4. Consult the appropriate user guide based on your role:
+   - link:user-guides/administrators.adoc[Administrator Guide] for platform operators
+   - link:user-guides/instructors.adoc[Instructor Guide] for workshop creators
+   - link:user-guides/end-users.adoc[End User Guide] for lab participants
+
+== Getting Help
+
+* **Documentation Issues**: Report issues or suggest improvements via GitHub issues
+* **Platform Support**: Contact the platform operations team
+* **Development Questions**: Consult the link:development/README.adoc[Developer Guide] or reach out to the development team
+
+== Contributing
+
+This documentation is maintained alongside the Babylon platform codebase. Contributions and improvements are welcome through pull requests.
+
+Last Updated: {docdate}

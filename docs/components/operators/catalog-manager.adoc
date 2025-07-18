@@ -1,0 +1,687 @@
+= Catalog Manager Operator
+
+== Overview
+
+The Catalog Manager Operator is a Kubernetes operator that manages catalog item lifecycle, metadata synchronization, and catalog organization within the Babylon platform. It handles automatic catalog item discovery from AgnosticD repositories, maintains catalog metadata consistency, and provides catalog item validation and versioning capabilities. The operator acts as the catalog orchestrator that transforms AgnosticD configurations into consumable catalog items.
+
+== Architecture
+
+=== Core Components
+
+==== Catalog Controller
+Main operator process that watches for catalog-related custom resources and orchestrates catalog item lifecycle management.
+
+==== Repository Scanner
+Monitors AgnosticD repositories for catalog item definitions and automatically creates or updates corresponding CatalogItem resources.
+
+==== Metadata Processor
+Processes catalog item metadata, validates configurations, and enriches catalog items with additional information.
+
+==== Validation Engine
+Validates catalog item configurations against schemas and business rules before making them available in the catalog.
+
+== Custom Resources
+
+=== CatalogItem
+
+Extended catalog item resource with lifecycle management capabilities.
+
+**Schema**:
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: CatalogItem
+metadata:
+  name: openshift-fundamentals
+  namespace: babylon-catalog-workshops
+  labels:
+    babylon.gpte.redhat.com/category: workshops
+    babylon.gpte.redhat.com/provider: redhat
+    babylon.gpte.redhat.com/level: intermediate
+  annotations:
+    babylon.gpte.redhat.com/catalogDisplayName: babylon-catalog-workshops
+    babylon.gpte.redhat.com/sourceRepo: https://github.com/redhat-cop/agnosticd
+    babylon.gpte.redhat.com/sourcePath: ansible/configs/ocp4-cluster
+    babylon.gpte.redhat.com/lastSyncTime: "2023-01-01T10:00:00Z"
+    babylon.gpte.redhat.com/validationStatus: valid
+spec:
+  displayName: OpenShift Fundamentals Workshop
+  description: Comprehensive hands-on workshop covering OpenShift fundamentals
+  longDescription: |
+    This workshop provides participants with practical experience in OpenShift fundamentals,
+    including container orchestration, application deployment, and platform operations.
+
+    Participants will learn:
+    - OpenShift architecture and concepts
+    - Container and pod management
+    - Application deployment strategies
+    - Service mesh basics
+    - Monitoring and observability
+
+  # Catalog organization
+  category: workshops
+  keywords: ["openshift", "containers", "kubernetes", "devops", "workshop"]
+  tags: ["beginner-friendly", "hands-on", "certified"]
+
+  # Provider information
+  provider:
+    name: redhat
+    displayName: Red Hat Training
+    url: https://www.redhat.com/en/services/training
+    supportUrl: https://access.redhat.com
+
+  # Content metadata
+  icon: data:image/svg+xml;base64,PHN2Zy...
+  screenshots:
+  - url: https://example.com/screenshots/openshift-console.png
+    caption: OpenShift Web Console
+  - url: https://example.com/screenshots/lab-interface.png
+    caption: Lab Interface
+
+  # Runtime specifications
+  runtime:
+    estimatedTime: 4h
+    difficulty: intermediate
+    prerequisites:
+    - basic-linux
+    - container-concepts
+    supportedPlatforms:
+    - aws
+    - azure
+    - gcp
+
+  # Resource requirements
+  resources:
+    cpu: "4 cores per user"
+    memory: "16GB per user"
+    storage: "100GB per user"
+    estimatedCost: "$2.50/hour per user"
+
+  # Lifecycle configuration
+  lifespan:
+    default: 8h
+    maximum: 24h
+    relativeMaximum: 7d
+
+  # Parameter definitions
+  parameters:
+  - name: user_count
+    displayName: Number of Users
+    description: Number of user environments to provision
+    openAPIV3Schema:
+      type: integer
+      default: 1
+      minimum: 1
+      maximum: 100
+    required: true
+    formGroup: sizing
+
+  - name: openshift_version
+    displayName: OpenShift Version
+    description: OpenShift cluster version to deploy
+    openAPIV3Schema:
+      type: string
+      default: "4.12"
+      enum: ["4.10", "4.11", "4.12", "4.13"]
+    required: false
+    formGroup: configuration
+
+  - name: aws_region
+    displayName: AWS Region
+    description: AWS region for deployment
+    openAPIV3Schema:
+      type: string
+      default: "us-east-1"
+      enum: ["us-east-1", "us-west-2", "eu-west-1", "ap-southeast-1"]
+    required: false
+    formGroup: infrastructure
+
+  # Access control
+  accessControl:
+    allowedRoles: ["user", "instructor", "admin"]
+    requireApproval: false
+    maxConcurrentDeployments: 5
+    allowedDomains: ["redhat.com", "example.com"]
+
+  # AgnosticD integration
+  agnosticd:
+    repo: https://github.com/redhat-cop/agnosticd
+    ref: development
+    configPath: ansible/configs/ocp4-cluster
+    workdir: /tmp/agnosticd
+
+status:
+  # Lifecycle state
+  phase: Available
+
+  # Validation results
+  validation:
+    status: Valid
+    lastValidated: "2023-01-01T10:00:00Z"
+    messages: []
+    schema: v1.2.0
+
+  # Usage statistics
+  statistics:
+    totalProvisions: 245
+    successfulProvisions: 238
+    failedProvisions: 7
+    averageProvisionTime: "12m"
+    lastProvisioned: "2023-01-01T15:30:00Z"
+
+  # Synchronization status
+  sync:
+    lastSyncTime: "2023-01-01T10:00:00Z"
+    syncStatus: Success
+    sourceCommit: "abc123def456"
+    generation: 5
+
+  conditions:
+  - type: Available
+    status: "True"
+    lastTransitionTime: "2023-01-01T10:00:00Z"
+    reason: CatalogItemReady
+    message: Catalog item is ready for provisioning
+  - type: Valid
+    status: "True"
+    lastTransitionTime: "2023-01-01T10:00:00Z"
+    reason: ValidationSuccessful
+    message: Catalog item configuration is valid
+```
+
+=== CatalogNamespace
+
+Manages catalog organization and namespace-level policies.
+
+**Schema**:
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: CatalogNamespace
+metadata:
+  name: babylon-catalog-workshops
+  namespace: babylon-catalog-workshops
+spec:
+  # Namespace metadata
+  displayName: "Workshop Catalog"
+  description: "Educational workshops and training content"
+
+  # Content organization
+  categories:
+  - name: workshops
+    displayName: "Interactive Workshops"
+    description: "Hands-on learning experiences"
+  - name: demos
+    displayName: "Product Demonstrations"
+    description: "Showcase product capabilities"
+  - name: labs
+    displayName: "Self-Paced Labs"
+    description: "Individual learning modules"
+
+  # Access policies
+  accessPolicy:
+    defaultAccess: restricted
+    allowedRoles: ["instructor", "admin"]
+    publicCategories: ["demos"]
+
+  # Content policies
+  contentPolicy:
+    requireApproval: true
+    maxItemsPerProvider: 50
+    allowedProviders: ["redhat", "community"]
+
+  # Synchronization settings
+  sync:
+    enabled: true
+    schedule: "0 2 * * *"  # Daily at 2 AM
+    sources:
+    - type: agnosticd
+      repo: https://github.com/redhat-cop/agnosticd
+      ref: development
+      paths: ["ansible/configs/*"]
+
+status:
+  # Namespace statistics
+  itemCount: 47
+  categories:
+  - name: workshops
+    count: 23
+  - name: demos
+    count: 15
+  - name: labs
+    count: 9
+
+  # Synchronization status
+  lastSync:
+    time: "2023-01-01T02:00:00Z"
+    status: Success
+    itemsAdded: 2
+    itemsUpdated: 5
+    itemsRemoved: 1
+
+  conditions:
+  - type: Ready
+    status: "True"
+    lastTransitionTime: "2023-01-01T02:05:00Z"
+    reason: SyncComplete
+    message: Catalog namespace is ready and synchronized
+```
+
+== Configuration
+
+=== Operator Configuration
+
+The Catalog Manager Operator is configured through environment variables and ConfigMaps:
+
+**Environment Variables**:
+```yaml
+env:
+- name: CATALOG_NAMESPACE
+  value: babylon-catalog-manager
+- name: CATALOG_DOMAIN
+  value: babylon.gpte.redhat.com
+- name: CATALOG_LOG_LEVEL
+  value: INFO
+- name: CATALOG_METRICS_PORT
+  value: "8080"
+- name: CATALOG_WEBHOOK_PORT
+  value: "9443"
+- name: AGNOSTICD_DEFAULT_REPO
+  value: "https://github.com/redhat-cop/agnosticd"
+- name: VALIDATION_SCHEMA_URL
+  value: "https://raw.githubusercontent.com/redhat-cop/babylon/main/schemas/catalog-item.json"
+```
+
+**Helm Configuration**:
+```yaml
+catalogManager:
+  image:
+    repository: quay.io/babylon/catalog-manager
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+  # Catalog synchronization
+  sync:
+    enabled: true
+    schedule: "0 */6 * * *"  # Every 6 hours
+    timeout: "30m"
+    concurrency: 3
+
+  # Repository sources
+  sources:
+    agnosticd:
+      enabled: true
+      repo: "https://github.com/redhat-cop/agnosticd"
+      ref: "development"
+      webhook:
+        enabled: true
+        secret: "agnosticd-webhook-secret"
+
+  # Validation settings
+  validation:
+    enabled: true
+    strict: false
+    schemaUrl: "https://raw.githubusercontent.com/redhat-cop/babylon/main/schemas/catalog-item.json"
+
+  # Content policies
+  contentPolicy:
+    maxItemSize: "10MB"
+    allowedImageRegistries:
+    - "quay.io"
+    - "registry.redhat.io"
+    - "docker.io"
+
+  # Metrics and monitoring
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: "30s"
+```
+
+=== Content Source Configuration
+
+**AgnosticD Repository Integration**:
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: catalog-sources
+  namespace: babylon-catalog-manager
+data:
+  agnosticd-config.yaml: |
+    sources:
+    - name: agnosticd-main
+      type: git
+      url: https://github.com/redhat-cop/agnosticd
+      ref: development
+      paths:
+      - ansible/configs/*
+      excludePaths:
+      - ansible/configs/test-*
+      - ansible/configs/archive/*
+
+    - name: babylon-labs
+      type: git
+      url: https://github.com/redhat-cop/babylon-labs
+      ref: main
+      paths:
+      - catalogs/*
+
+    mapping:
+      configPath: meta/main.yml
+      iconPath: files/icon.svg
+      screenshotPaths:
+      - files/screenshots/*.png
+      - files/screenshots/*.jpg
+```
+
+== Operations
+
+=== Managing Catalog Items
+
+**List Catalog Items**:
+```bash
+# List all catalog items
+kubectl get catalogitems -A
+
+# List items in specific namespace
+kubectl get catalogitems -n babylon-catalog-workshops
+
+# Filter by category
+kubectl get catalogitems -A -l babylon.gpte.redhat.com/category=workshops
+
+# Filter by provider
+kubectl get catalogitems -A -l babylon.gpte.redhat.com/provider=redhat
+```
+
+**Check Catalog Item Status**:
+```bash
+# Get catalog item details
+kubectl get catalogitem openshift-fundamentals -n babylon-catalog-workshops -o yaml
+
+# Check validation status
+kubectl get catalogitem openshift-fundamentals -n babylon-catalog-workshops \
+  -o jsonpath='{.status.validation.status}'
+
+# Check usage statistics
+kubectl get catalogitem openshift-fundamentals -n babylon-catalog-workshops \
+  -o jsonpath='{.status.statistics}'
+```
+
+**Validate Catalog Item**:
+```bash
+# Trigger validation
+kubectl annotate catalogitem openshift-fundamentals -n babylon-catalog-workshops \
+  babylon.gpte.redhat.com/validate=true
+
+# Check validation results
+kubectl get catalogitem openshift-fundamentals -n babylon-catalog-workshops \
+  -o jsonpath='{.status.validation.messages}'
+```
+
+=== Managing Catalog Synchronization
+
+**Trigger Manual Sync**:
+```bash
+# Sync specific namespace
+kubectl annotate catalognamespace babylon-catalog-workshops \
+  babylon.gpte.redhat.com/sync=true
+
+# Force full resync
+kubectl annotate catalognamespace babylon-catalog-workshops \
+  babylon.gpte.redhat.com/full-sync=true
+```
+
+**Monitor Sync Status**:
+```bash
+# Check sync status
+kubectl get catalognamespace babylon-catalog-workshops \
+  -o jsonpath='{.status.lastSync}'
+
+# Check sync history
+kubectl describe catalognamespace babylon-catalog-workshops
+```
+
+**Configure Sync Schedule**:
+```bash
+# Update sync schedule
+kubectl patch catalognamespace babylon-catalog-workshops --type='merge' \
+  -p='{"spec":{"sync":{"schedule":"0 4 * * *"}}}'
+
+# Disable sync
+kubectl patch catalognamespace babylon-catalog-workshops --type='merge' \
+  -p='{"spec":{"sync":{"enabled":false}}}'
+```
+
+=== Catalog Content Management
+
+**Add New Catalog Source**:
+```bash
+# Add new AgnosticD source
+kubectl patch catalognamespace babylon-catalog-workshops --type='merge' \
+  -p='{"spec":{"sync":{"sources":[{"type":"agnosticd","repo":"https://github.com/example/agnosticd-custom","ref":"main","paths":["ansible/configs/*"]}]}}}'
+```
+
+**Update Catalog Item Metadata**:
+```bash
+# Update display name
+kubectl patch catalogitem openshift-fundamentals -n babylon-catalog-workshops --type='merge' \
+  -p='{"spec":{"displayName":"OpenShift Fundamentals - Updated"}}'
+
+# Update category
+kubectl patch catalogitem openshift-fundamentals -n babylon-catalog-workshops --type='merge' \
+  -p='{"spec":{"category":"advanced-workshops"}}'
+
+# Add tags
+kubectl patch catalogitem openshift-fundamentals -n babylon-catalog-workshops --type='merge' \
+  -p='{"spec":{"tags":["certified","enterprise","popular"]}}'
+```
+
+**Manage Catalog Item Lifecycle**:
+```bash
+# Mark item as deprecated
+kubectl patch catalogitem openshift-fundamentals -n babylon-catalog-workshops --type='merge' \
+  -p='{"spec":{"lifecycle":"deprecated"}}'
+
+# Archive catalog item
+kubectl patch catalogitem openshift-fundamentals -n babylon-catalog-workshops --type='merge' \
+  -p='{"spec":{"lifecycle":"archived"}}'
+```
+
+=== Troubleshooting
+
+**Check Operator Health**:
+```bash
+# Check operator deployment
+kubectl get deployment catalog-manager -n babylon-catalog-manager
+
+# Check operator logs
+kubectl logs deployment/catalog-manager -n babylon-catalog-manager
+
+# Check operator metrics
+kubectl port-forward deployment/catalog-manager -n babylon-catalog-manager 8080:8080
+curl http://localhost:8080/metrics
+```
+
+**Debug Sync Issues**:
+```bash
+# Check sync job status
+kubectl get jobs -n babylon-catalog-manager -l app=catalog-sync
+
+# Check sync job logs
+kubectl logs job/catalog-sync-$(date +%Y%m%d%H%M) -n babylon-catalog-manager
+
+# Check repository access
+kubectl exec deployment/catalog-manager -n babylon-catalog-manager -- \
+  git ls-remote https://github.com/redhat-cop/agnosticd
+```
+
+**Debug Validation Issues**:
+```bash
+# Check validation errors
+kubectl get catalogitems -A -o jsonpath='{.items[?(@.status.validation.status=="Invalid")].metadata.name}'
+
+# Get validation details
+kubectl get catalogitem failed-item -n babylon-catalog-workshops \
+  -o jsonpath='{.status.validation.messages}'
+
+# Validate specific item manually
+kubectl exec deployment/catalog-manager -n babylon-catalog-manager -- \
+  catalog-validator validate /path/to/catalog-item.yaml
+```
+
+== Integration Patterns
+
+=== With AgnosticV Operator
+
+Catalog Manager synchronizes with AgnosticV repositories:
+
+```yaml
+# AgnosticV component triggers catalog item creation
+apiVersion: agnosticv.gpte.redhat.com/v1
+kind: AgnosticVComponent
+metadata:
+  name: ocp4-cluster
+  namespace: agnosticv-operator
+spec:
+  agnosticdRepoUrl: https://github.com/redhat-cop/agnosticd
+  agnosticdRepoRef: development
+  configDirPath: ansible/configs/ocp4-cluster
+
+  # Catalog integration
+  catalogItem:
+    enabled: true
+    namespace: babylon-catalog-workshops
+    category: workshops
+    metadata:
+      displayName: "OpenShift 4 Cluster"
+      description: "Multi-node OpenShift 4 cluster"
+```
+
+=== With Catalog UI
+
+Catalog items are consumed by the web interface:
+
+```javascript
+// Catalog UI fetches items via API
+const response = await fetch('/api/catalog/v1/items', {
+  headers: { 'Authorization': `Bearer ${token}` }
+});
+
+const catalogItems = await response.json();
+
+// Filter and display items
+const workshopItems = catalogItems.items.filter(
+  item => item.spec.category === 'workshops'
+);
+```
+
+=== With Workshop Manager
+
+Workshop Manager uses catalog items for workshop creation:
+
+```yaml
+# Workshop references catalog item
+apiVersion: babylon.gpte.redhat.com/v1
+kind: Workshop
+metadata:
+  name: openshift-fundamentals-dec2023
+  namespace: user-instructor-jane-20231215
+spec:
+  catalogItem:
+    name: openshift-fundamentals
+    namespace: babylon-catalog-workshops
+  parameters:
+    user_count: 25
+    openshift_version: "4.12"
+```
+
+== Performance Tuning
+
+=== Sync Optimization
+
+**Efficient Repository Scanning**:
+```yaml
+catalogManager:
+  sync:
+    # Parallel processing
+    concurrency: 5
+
+    # Incremental sync
+    incrementalSync: true
+    changeDetection: "commit-hash"
+
+    # Caching
+    enableCache: true
+    cacheRetention: "24h"
+
+    # Rate limiting
+    rateLimiting:
+      enabled: true
+      requestsPerSecond: 10
+```
+
+**Content Filtering**:
+```yaml
+spec:
+  sync:
+    sources:
+    - type: agnosticd
+      repo: https://github.com/redhat-cop/agnosticd
+      paths: ["ansible/configs/*"]
+      excludePaths:
+      - "ansible/configs/test-*"
+      - "ansible/configs/archive/*"
+      - "ansible/configs/unsupported-*"
+
+      # Only process changed files
+      incrementalMode: true
+      lastCommit: "abc123def456"
+```
+
+=== Validation Optimization
+
+**Schema Caching**:
+```yaml
+catalogManager:
+  validation:
+    # Cache validation schemas
+    schemaCaching:
+      enabled: true
+      ttl: "1h"
+
+    # Parallel validation
+    parallelValidation: true
+    maxConcurrentValidations: 10
+
+    # Skip unchanged items
+    skipUnchanged: true
+```
+
+=== Database Optimization
+
+**Metadata Indexing**:
+```yaml
+catalogManager:
+  database:
+    # Index commonly queried fields
+    indexes:
+    - fields: ["spec.category", "metadata.labels"]
+    - fields: ["spec.provider.name"]
+    - fields: ["status.phase"]
+
+    # Query optimization
+    queryCache:
+      enabled: true
+      size: "100MB"
+      ttl: "5m"
+```
+
+The Catalog Manager Operator provides comprehensive catalog lifecycle management, enabling automated content discovery, validation, and organization while maintaining synchronization with source repositories and providing rich metadata for enhanced user experiences.

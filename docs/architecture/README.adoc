@@ -1,0 +1,287 @@
+= Architecture Overview
+
+== High-Level System Architecture
+
+The Babylon Platform follows a cloud-native, microservices architecture built on Kubernetes/OpenShift. The system is designed around the operator pattern with custom resources defining the desired state and controllers ensuring the actual state matches the desired state.
+
+[source,mermaid]
+----
+graph TB
+    subgraph "User Layer"
+        UI[Catalog UI]
+        AdminUI[Admin UI]
+        StatusUI[Status UI]
+    end
+
+    subgraph "API Layer"
+        CatalogAPI[Catalog API]
+        AdminAPI[Admin API]
+        RatingsAPI[Ratings API]
+        K8sAPI[Kubernetes API]
+    end
+
+    subgraph "Core Operators"
+        AgnosticV[AgnosticV Operator]
+        Anarchy[Anarchy Operator]
+        Poolboy[Poolboy Operator]
+        Workshop[Workshop Manager]
+        LabUI[Lab UI Manager]
+        CostTracker[Cost Tracker]
+        Catalog[Catalog Manager]
+        Notifier[Notifier]
+    end
+
+    subgraph "External Systems"
+        Tower[Ansible Tower/AAP]
+        AWS[Amazon Web Services]
+        Git[Git Repositories]
+        LDAP[LDAP/SSO]
+        SMTP[SMTP Server]
+    end
+
+    subgraph "Data Layer"
+        ETCD[etcd/Kubernetes API]
+        Redis[Redis Cache]
+        Postgres[PostgreSQL]
+    end
+
+    UI --> CatalogAPI
+    AdminUI --> AdminAPI
+    CatalogAPI --> K8sAPI
+    AdminAPI --> K8sAPI
+    RatingsAPI --> Postgres
+
+    K8sAPI --> AgnosticV
+    K8sAPI --> Anarchy
+    K8sAPI --> Poolboy
+    K8sAPI --> Workshop
+    K8sAPI --> LabUI
+    K8sAPI --> CostTracker
+    K8sAPI --> Catalog
+    K8sAPI --> Notifier
+
+    AgnosticV --> Tower
+    AgnosticV --> Git
+    Anarchy --> Tower
+    CostTracker --> AWS
+    Notifier --> SMTP
+    Notifier --> Redis
+
+    K8sAPI --> ETCD
+----
+
+== Component Architecture Patterns
+
+=== Operator Pattern
+All core components follow the Kubernetes operator pattern:
+
+* **Custom Resource Definitions (CRDs)**: Define the schema for custom resources
+* **Controllers**: Watch for changes to custom resources and reconcile state
+* **Status Reporting**: Update resource status to reflect current state
+* **Event Handling**: React to cluster events and external system changes
+
+=== Resource Hierarchy
+The platform uses a hierarchical resource model:
+
+```
+CatalogItem
+├── ResourceProvider (Poolboy)
+├── ResourcePool (Poolboy)
+├── ResourceClaim (User Request)
+│   └── ResourceHandle (Poolboy)
+│       └── AnarchySubject (Anarchy)
+│           └── External Resources (AWS, etc.)
+└── Workshop
+    ├── WorkshopProvision
+    │   └── ResourceClaim
+    └── WorkshopUserAssignment
+```
+
+== Core Component Relationships
+
+=== AgnosticV Operator
+**Purpose**: Manages catalog definitions from Git repositories and creates Babylon resources
+
+**Key Relationships**:
+* Watches `AgnosticVRepo` resources for Git repository configurations
+* Creates `CatalogItem` resources from AgnosticV component definitions
+* Manages Anarchy roles and collections for execution environments
+* Integrates with GitHub for pull request workflows
+
+**Data Flow**:
+```
+Git Repository → AgnosticVRepo → AgnosticVComponent → CatalogItem
+```
+
+=== Anarchy Operator (External)
+**Purpose**: Provides stateless automation execution using Ansible
+
+**Key Relationships**:
+* Executes Ansible playbooks defined in `AnarchyGovernor` resources
+* Manages `AnarchySubject` resources representing automation workloads
+* Integrates with Ansible Tower/AAP for execution environments
+* Reports status back to dependent resources
+
+**Resource Types**:
+* `AnarchyGovernor`: Defines automation workflows
+* `AnarchySubject`: Represents individual automation instances
+* `AnarchyAction`: Triggers specific automation actions
+
+=== Poolboy Operator (External)
+**Purpose**: Manages resource lifecycle and pooling for efficient resource utilization
+
+**Key Relationships**:
+* Manages `ResourceProvider` definitions for different resource types
+* Maintains `ResourcePool` instances for pre-provisioned resources
+* Handles `ResourceClaim` requests from users
+* Creates and manages `ResourceHandle` instances
+* Coordinates with Anarchy for actual resource provisioning
+
+**Resource Flow**:
+```
+ResourceClaim → ResourceProvider → ResourceHandle → AnarchySubject
+```
+
+=== Workshop Manager
+**Purpose**: Orchestrates workshop delivery and user management
+
+**Key Relationships**:
+* Manages `Workshop` resources for workshop definitions
+* Creates `WorkshopProvision` resources for bulk provisioning
+* Handles `WorkshopUserAssignment` for user-to-resource mapping
+* Coordinates with Poolboy for resource allocation
+* Integrates with Lab UI Manager for user interfaces
+
+=== Lab UI Manager
+**Purpose**: Deploys and manages lab user interfaces (Bookbag)
+
+**Key Relationships**:
+* Manages `BookbagBuild` resources for lab content building
+* Creates `BookbagDeployment` resources for user-specific lab interfaces
+* Integrates with OpenShift Routes for external access
+* Coordinates with Workshop Manager for user assignments
+
+=== Catalog Manager
+**Purpose**: Manages catalog item lifecycle and integration with external systems
+
+**Key Relationships**:
+* Synchronizes catalog items across namespaces
+* Manages catalog item metadata and classifications
+* Handles catalog item deprecation and migration
+* Integrates with external catalog systems
+
+=== Cost Tracker
+**Purpose**: Monitors and reports on AWS infrastructure costs
+
+**Key Relationships**:
+* Tracks AWS costs associated with AnarchySubject resources
+* Provides cost allocation and reporting capabilities
+* Integrates with AWS Cost Explorer APIs
+* Reports cost data for chargeback and optimization
+
+=== Notifier
+**Purpose**: Provides event-driven notification services
+
+**Key Relationships**:
+* Watches for resource state changes across the platform
+* Sends email notifications for important events
+* Uses Redis for notification queuing and deduplication
+* Supports customizable notification templates
+
+== Communication Patterns
+
+=== Event-Driven Communication
+Components primarily communicate through Kubernetes events and custom resource status updates:
+
+* **Watch Patterns**: Controllers watch for changes to relevant resources
+* **Status Updates**: Components update resource status to communicate state
+* **Annotations**: Used for configuration and cross-component communication
+* **Labels**: Enable resource selection and grouping
+
+=== API Communication
+Direct API communication is used for:
+
+* **External Systems**: Integration with Ansible Tower, AWS, Git repositories
+* **User Interfaces**: REST APIs for frontend applications
+* **Administrative Operations**: Management and monitoring interfaces
+
+=== Asynchronous Processing
+Long-running operations use asynchronous patterns:
+
+* **Resource Queuing**: Work items queued for batch processing
+* **Retry Logic**: Built-in retry mechanisms for transient failures
+* **Status Polling**: Regular status checks for external resource state
+
+== Scalability and Resilience
+
+=== Horizontal Scaling
+* **Operator Instances**: Multiple operator replicas with leader election
+* **Resource Pooling**: Pre-provisioned resources for instant availability
+* **Namespace Isolation**: Multi-tenant architecture with namespace boundaries
+
+=== Fault Tolerance
+* **Controller Restart**: Operators can restart without losing state
+* **Resource Recovery**: Automatic recovery from transient failures
+* **External System Integration**: Resilient integration with external dependencies
+
+=== Performance Optimization
+* **Resource Caching**: Intelligent caching of expensive operations
+* **Batch Processing**: Bulk operations for efficiency
+* **Resource Lifecycle**: Automatic cleanup and resource reclamation
+
+== Security Architecture
+
+=== Authentication and Authorization
+* **Service Accounts**: Kubernetes service accounts for component identity
+* **RBAC**: Role-based access control for resource permissions
+* **OAuth Integration**: OpenShift OAuth for user authentication
+
+=== Network Security
+* **Network Policies**: Pod-to-pod communication restrictions
+* **Service Mesh**: Optional service mesh for advanced traffic management
+* **TLS Encryption**: End-to-end encryption for API communication
+
+=== Secrets Management
+* **Kubernetes Secrets**: Secure storage of sensitive configuration
+* **Secret Rotation**: Automated secret rotation capabilities
+* **Least Privilege**: Minimal permissions for service accounts
+
+== Monitoring and Observability
+
+=== Metrics Collection
+* **Prometheus Metrics**: Custom metrics from all operators
+* **Resource Metrics**: Kubernetes resource utilization
+* **Business Metrics**: Workshop and provisioning success rates
+
+=== Logging
+* **Structured Logging**: JSON-formatted logs for analysis
+* **Log Aggregation**: Centralized log collection and storage
+* **Audit Logging**: Comprehensive audit trails for compliance
+
+=== Tracing
+* **Request Tracing**: End-to-end request tracing capabilities
+* **Performance Monitoring**: Application performance insights
+* **Error Tracking**: Automated error detection and alerting
+
+== Deployment Architecture
+
+=== Namespace Organization
+```
+babylon-config          # Central configuration and AgnosticV operator
+babylon-anarchy         # Anarchy operator and commune
+poolboy                 # Poolboy operator and resources
+babylon-catalog-*       # Catalog interfaces per environment
+babylon-workshop-manager # Workshop management
+babylon-admin           # Administrative interface
+babylon-ratings         # Ratings and feedback system
+babylon-notifier        # Notification services
+babylon-cost-tracker    # Cost tracking and reporting
+babylon-lab-ui-manager  # Lab interface management
+```
+
+=== Resource Distribution
+* **Cluster-Scoped Resources**: CRDs, ClusterRoles, ClusterRoleBindings
+* **Namespace-Scoped Resources**: Deployments, Services, ConfigMaps, Secrets
+* **User Resources**: ResourceClaims, Workshops in user namespaces
+
+This architecture provides a robust, scalable foundation for enterprise-grade workshop and infrastructure management while maintaining clear separation of concerns and operational simplicity.

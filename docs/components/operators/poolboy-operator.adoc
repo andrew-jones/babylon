@@ -1,0 +1,745 @@
+= Poolboy Operator
+
+== Overview
+
+The Poolboy Operator is a Kubernetes operator that provides resource lifecycle management and resource pooling capabilities. It manages the provisioning, allocation, and deprovisioning of resources through a declarative API, enabling efficient resource utilization and automated lifecycle management. Poolboy acts as the resource broker that handles resource claims and maintains resource pools for improved performance and cost optimization.
+
+== Architecture
+
+=== Core Components
+
+==== Poolboy Controller
+Main operator process that watches for changes to Poolboy custom resources and orchestrates resource lifecycle operations.
+
+==== Resource Pools
+Pre-provisioned resources that are ready for immediate allocation, reducing provisioning time from hours to minutes.
+
+==== Resource Providers
+Templates and configurations that define how resources are created and managed through external systems.
+
+==== Resource Claims
+User requests for resources that are fulfilled through resource allocation from pools or on-demand provisioning.
+
+== Custom Resources
+
+=== ResourceProvider
+
+Defines how resources are created and managed, including templates and provisioning logic.
+
+**Schema**:
+```yaml
+apiVersion: poolboy.gpte.redhat.com/v1
+kind: ResourceProvider
+metadata:
+  name: babylon
+  namespace: poolboy
+spec:
+  # Reference to external provisioning system
+  override:
+    apiVersion: anarchy.gpte.redhat.com/v1
+    kind: AnarchyGovernor
+    name: babylon
+    namespace: anarchy-operator
+
+  # Template for creating resources
+  template:
+    apiVersion: anarchy.gpte.redhat.com/v1
+    kind: AnarchySubject
+    metadata:
+      namespace: anarchy-operator
+    spec:
+      governor: babylon
+      parameters:
+        job_vars: "{{ parameters }}"
+        guid: "{{ guid }}"
+
+  # Default parameters
+  default:
+    spec:
+      parameters:
+        job_vars:
+          cloud_provider: aws
+          aws_region: us-east-1
+
+  # Parameter validation
+  validation:
+    openAPIV3Schema:
+      type: object
+      properties:
+        spec:
+          type: object
+          properties:
+            parameters:
+              type: object
+              properties:
+                job_vars:
+                  type: object
+                  properties:
+                    user_count:
+                      type: integer
+                      minimum: 1
+                      maximum: 100
+                    env_type:
+                      type: string
+                      enum: ["ocp4-cluster", "ocp4-workshop", "three-tier-app"]
+                  required: ["user_count", "env_type"]
+              required: ["job_vars"]
+          required: ["parameters"]
+      required: ["spec"]
+
+  # Resource state management
+  updateFilters:
+  - name: IgnoreOwnerRef
+    type: jq
+    expression: |
+      . as $root |
+      (.spec.parameters.job_vars // {}) as $job_vars |
+      if $job_vars.desired_state == "stopped" or $job_vars.desired_state == "started" then
+        $root
+      else
+        empty
+      end
+```
+
+=== ResourcePool
+
+Manages a pool of pre-provisioned resources for efficient allocation.
+
+**Schema**:
+```yaml
+apiVersion: poolboy.gpte.redhat.com/v1
+kind: ResourcePool
+metadata:
+  name: babylon-ocp4-clusters
+  namespace: poolboy
+spec:
+  # Resource provider reference
+  provider:
+    name: babylon
+    namespace: poolboy
+
+  # Pool sizing configuration
+  minAvailable: 2
+  maxResources: 10
+
+  # Resource template override
+  template:
+    spec:
+      parameters:
+        job_vars:
+          env_type: ocp4-cluster
+          user_count: 1
+          cloud_provider: aws
+          aws_region: us-east-1
+          subdomain_base: "example.opentlc.com"
+
+  # Lifecycle management
+  lifespan:
+    default: "8h"
+    maximum: "24h"
+    relative: "7d"
+
+  # Auto-scaling configuration
+  autoScale:
+    enabled: true
+    scaleUpTrigger:
+      availablePercent: 20
+    scaleDownTrigger:
+      availablePercent: 80
+      minimumAge: "2h"
+status:
+  # Current pool state
+  summary:
+    total: 8
+    available: 3
+    claimed: 4
+    unhealthy: 1
+
+  # Individual resource status
+  resources:
+  - name: babylon-ocp4-pool-001
+    state: available
+    created: "2023-01-01T10:00:00Z"
+    lastUsed: "2023-01-01T14:30:00Z"
+  - name: babylon-ocp4-pool-002
+    state: claimed
+    created: "2023-01-01T11:00:00Z"
+    claimedBy:
+      name: my-cluster-claim
+      namespace: user-johndoe
+
+  conditions:
+  - type: Available
+    status: "True"
+    lastTransitionTime: "2023-01-01T10:00:00Z"
+    reason: PoolHealthy
+    message: Pool has sufficient available resources
+```
+
+=== ResourceClaim
+
+Represents a user request for resources that are fulfilled through resource allocation.
+
+**Schema**:
+```yaml
+apiVersion: poolboy.gpte.redhat.com/v1
+kind: ResourceClaim
+metadata:
+  name: my-openshift-cluster
+  namespace: user-johndoe
+  labels:
+    babylon.gpte.redhat.com/catalogItem: openshift-workshop
+spec:
+  # Resource requirements
+  resources:
+  - provider:
+      name: babylon
+      namespace: poolboy
+    template:
+      spec:
+        parameters:
+          job_vars:
+            env_type: ocp4-cluster
+            user_count: 1
+            aws_region: us-west-2
+            software_to_deploy: "openshift4"
+
+  # Lifecycle configuration
+  lifespan:
+    end: "2023-01-02T18:00:00Z"
+    maximum: "24h"
+    relativeMaximum: "7d"
+
+  # User information
+  requester:
+    user: johndoe
+    email: "johndoe@example.com"
+    groups: ["developers", "users"]
+status:
+  # Current claim state
+  phase: Bound
+
+  # Resource allocations
+  resources:
+  - name: babylon-ocp4-pool-002
+    state: ready
+    reference:
+      apiVersion: anarchy.gpte.redhat.com/v1
+      kind: AnarchySubject
+      name: babylon-openshift-cluster-johndoe-001
+      namespace: anarchy-operator
+
+  # Access information
+  summary:
+    healthy: 1
+    failed: 0
+    inProgress: 0
+
+  # Resource details
+  resourceDetails:
+    console_url: "https://console-openshift-console.apps.cluster-johndoe.example.com"
+    api_url: "https://api.cluster-johndoe.example.com:6443"
+    admin_username: "admin"
+    admin_password: "secure-password-123"
+    user_data:
+      users:
+      - username: "user1"
+        password: "user-password-123"
+
+  conditions:
+  - type: Bound
+    status: "True"
+    lastTransitionTime: "2023-01-01T15:30:00Z"
+    reason: ResourceAllocated
+    message: Resource successfully allocated from pool
+```
+
+=== ResourceHandle
+
+Internal resource representation used for pool management and lifecycle tracking.
+
+**Schema**:
+```yaml
+apiVersion: poolboy.gpte.redhat.com/v1
+kind: ResourceHandle
+metadata:
+  name: babylon-ocp4-pool-002
+  namespace: poolboy
+  labels:
+    poolboy.gpte.redhat.com/resource-pool-name: babylon-ocp4-clusters
+spec:
+  # Resource provider reference
+  provider:
+    name: babylon
+    namespace: poolboy
+
+  # Resource specification
+  resources:
+  - reference:
+      apiVersion: anarchy.gpte.redhat.com/v1
+      kind: AnarchySubject
+      name: babylon-openshift-cluster-pool-002
+      namespace: anarchy-operator
+    template:
+      spec:
+        parameters:
+          job_vars:
+            guid: "pool-002"
+            env_type: ocp4-cluster
+            user_count: 1
+
+  # Lifecycle state
+  lifespan:
+    end: "2023-01-02T10:00:00Z"
+    maximum: "24h"
+status:
+  # Current handle state
+  phase: Available
+
+  # Resource state
+  resources:
+  - state: ready
+    summary:
+      healthy: 1
+      failed: 0
+      inProgress: 0
+
+  # Usage tracking
+  claimedBy:
+    apiVersion: poolboy.gpte.redhat.com/v1
+    kind: ResourceClaim
+    name: my-openshift-cluster
+    namespace: user-johndoe
+
+  conditions:
+  - type: Ready
+    status: "True"
+    lastTransitionTime: "2023-01-01T10:30:00Z"
+    reason: ResourceReady
+    message: Resource is ready for allocation
+```
+
+== Configuration
+
+=== Operator Configuration
+
+The Poolboy Operator is configured through environment variables and ConfigMaps:
+
+**Environment Variables**:
+```yaml
+env:
+- name: POOLBOY_NAMESPACE
+  value: poolboy
+- name: POOLBOY_DOMAIN
+  value: poolboy.gpte.redhat.com
+- name: POOLBOY_LOG_LEVEL
+  value: INFO
+- name: POOLBOY_METRICS_PORT
+  value: "8080"
+- name: POOLBOY_WEBHOOK_PORT
+  value: "9443"
+```
+
+**Helm Configuration**:
+```yaml
+poolboy:
+  image:
+    repository: quay.io/babylon/poolboy
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+  # Resource pool defaults
+  resourcePools:
+    defaultMinAvailable: 1
+    defaultMaxResources: 20
+    defaultLifespan: "8h"
+
+  # Auto-scaling configuration
+  autoScale:
+    enabled: true
+    defaultScaleUpPercent: 20
+    defaultScaleDownPercent: 80
+    reconcileInterval: "5m"
+
+  # Webhook configuration
+  webhook:
+    enabled: true
+    failurePolicy: Fail
+    caBundle: ""  # Auto-generated if empty
+```
+
+=== Resource Pool Configuration
+
+**Basic Pool Configuration**:
+```yaml
+apiVersion: poolboy.gpte.redhat.com/v1
+kind: ResourcePool
+metadata:
+  name: babylon-ocp4-small
+  namespace: poolboy
+spec:
+  provider:
+    name: babylon
+    namespace: poolboy
+
+  minAvailable: 2
+  maxResources: 10
+
+  template:
+    spec:
+      parameters:
+        job_vars:
+          env_type: ocp4-cluster
+          user_count: 1
+          instance_type: "m5.xlarge"
+
+  lifespan:
+    default: "8h"
+    maximum: "24h"
+```
+
+**Multi-Region Pool Configuration**:
+```yaml
+apiVersion: poolboy.gpte.redhat.com/v1
+kind: ResourcePool
+metadata:
+  name: babylon-ocp4-us-west
+  namespace: poolboy
+spec:
+  provider:
+    name: babylon
+    namespace: poolboy
+
+  template:
+    spec:
+      parameters:
+        job_vars:
+          env_type: ocp4-cluster
+          cloud_provider: aws
+          aws_region: us-west-2
+
+  # Region-specific sizing
+  minAvailable: 1
+  maxResources: 5
+```
+
+== Operations
+
+=== Managing Resource Pools
+
+**Create Resource Pool**:
+```bash
+# Apply pool configuration
+kubectl apply -f resource-pool.yaml
+
+# Check pool status
+kubectl get resourcepool babylon-ocp4-clusters -n poolboy -o yaml
+
+# Monitor pool scaling
+kubectl get resourcepool babylon-ocp4-clusters -n poolboy -w
+```
+
+**Monitor Pool Health**:
+```bash
+# Check pool summary
+kubectl get resourcepool babylon-ocp4-clusters -n poolboy \
+  -o jsonpath='{.status.summary}'
+
+# List pool resources
+kubectl get resourcehandles -n poolboy \
+  -l poolboy.gpte.redhat.com/resource-pool-name=babylon-ocp4-clusters
+
+# Check available resources
+kubectl get resourcehandles -n poolboy \
+  -l poolboy.gpte.redhat.com/resource-pool-name=babylon-ocp4-clusters \
+  --field-selector status.phase=Available
+```
+
+**Scale Pool Manually**:
+```bash
+# Increase pool size
+kubectl patch resourcepool babylon-ocp4-clusters -n poolboy --type='merge' \
+  -p='{"spec":{"maxResources":15}}'
+
+# Increase minimum available
+kubectl patch resourcepool babylon-ocp4-clusters -n poolboy --type='merge' \
+  -p='{"spec":{"minAvailable":3}}'
+```
+
+=== Managing Resource Claims
+
+**Create Resource Claim**:
+```bash
+# Apply claim configuration
+kubectl apply -f resource-claim.yaml
+
+# Check claim status
+kubectl get resourceclaim my-openshift-cluster -n user-johndoe -o yaml
+
+# Monitor claim fulfillment
+kubectl get resourceclaim my-openshift-cluster -n user-johndoe -w
+```
+
+**Check Claim Access Information**:
+```bash
+# Get console URL
+kubectl get resourceclaim my-openshift-cluster -n user-johndoe \
+  -o jsonpath='{.status.resourceDetails.console_url}'
+
+# Get admin credentials
+kubectl get resourceclaim my-openshift-cluster -n user-johndoe \
+  -o jsonpath='{.status.resourceDetails.admin_username}'
+
+kubectl get resourceclaim my-openshift-cluster -n user-johndoe \
+  -o jsonpath='{.status.resourceDetails.admin_password}'
+```
+
+**Extend Claim Lifespan**:
+```bash
+# Extend lifespan by 4 hours
+kubectl patch resourceclaim my-openshift-cluster -n user-johndoe --type='merge' \
+  -p='{"spec":{"lifespan":{"end":"'$(date -d '+4 hours' -Iseconds)'"}}}'
+```
+
+=== Managing Resource Handles
+
+**List Available Handles**:
+```bash
+# List all handles
+kubectl get resourcehandles -n poolboy
+
+# Filter by pool
+kubectl get resourcehandles -n poolboy \
+  -l poolboy.gpte.redhat.com/resource-pool-name=babylon-ocp4-clusters
+
+# Filter by state
+kubectl get resourcehandles -n poolboy --field-selector status.phase=Available
+```
+
+**Check Handle Details**:
+```bash
+# Get handle configuration
+kubectl get resourcehandle babylon-ocp4-pool-002 -n poolboy -o yaml
+
+# Check underlying resource
+kubectl get anarchysubject babylon-openshift-cluster-pool-002 -n anarchy-operator -o yaml
+```
+
+**Force Handle Cleanup**:
+```bash
+# Delete specific handle (triggers cleanup)
+kubectl delete resourcehandle babylon-ocp4-pool-002 -n poolboy
+
+# Cleanup orphaned handles
+kubectl get resourcehandles -n poolboy --field-selector status.phase=Failed
+```
+
+=== Troubleshooting
+
+**Check Operator Health**:
+```bash
+# Check operator deployment
+kubectl get deployment poolboy -n poolboy
+
+# Check operator logs
+kubectl logs deployment/poolboy -n poolboy
+
+# Check operator metrics
+kubectl port-forward deployment/poolboy -n poolboy 8080:8080
+curl http://localhost:8080/metrics
+```
+
+**Debug Pool Issues**:
+```bash
+# Check pool events
+kubectl describe resourcepool babylon-ocp4-clusters -n poolboy
+
+# Check pool conditions
+kubectl get resourcepool babylon-ocp4-clusters -n poolboy \
+  -o jsonpath='{.status.conditions[*].type}'
+
+# List unhealthy resources
+kubectl get resourcehandles -n poolboy \
+  -l poolboy.gpte.redhat.com/resource-pool-name=babylon-ocp4-clusters \
+  --field-selector status.phase=Failed
+```
+
+**Debug Claim Issues**:
+```bash
+# Check claim events
+kubectl describe resourceclaim my-openshift-cluster -n user-johndoe
+
+# Check claim conditions
+kubectl get resourceclaim my-openshift-cluster -n user-johndoe \
+  -o jsonpath='{.status.conditions[*].message}'
+
+# Check resource provider
+kubectl get resourceprovider babylon -n poolboy -o yaml
+```
+
+== Integration Patterns
+
+=== With Babylon Catalog
+
+Resource claims are created from catalog item requests:
+
+```yaml
+# Catalog UI creates this ResourceClaim
+apiVersion: poolboy.gpte.redhat.com/v1
+kind: ResourceClaim
+metadata:
+  name: workshop-cluster-001
+  namespace: user-instructor-jane
+  labels:
+    babylon.gpte.redhat.com/catalogItem: openshift-fundamentals
+spec:
+  resources:
+  - provider:
+      name: babylon
+      namespace: poolboy
+    template:
+      spec:
+        parameters:
+          job_vars:
+            env_type: ocp4-cluster
+            user_count: 25
+```
+
+=== With Workshop Manager
+
+Workshop Manager creates resource claims for workshop environments:
+
+```yaml
+# Workshop Manager creates multiple claims
+apiVersion: poolboy.gpte.redhat.com/v1
+kind: ResourceClaim
+metadata:
+  name: workshop-student-001
+  namespace: user-instructor-jane
+  labels:
+    babylon.gpte.redhat.com/workshop: openshift-fundamentals
+    babylon.gpte.redhat.com/user: student001
+spec:
+  resources:
+  - provider:
+      name: babylon
+      namespace: poolboy
+    template:
+      spec:
+        parameters:
+          job_vars:
+            env_type: ocp4-workshop
+            user_count: 1
+            guid: "student001"
+```
+
+=== With Anarchy Operator
+
+Poolboy manages resource lifecycle through Anarchy:
+
+```yaml
+# Poolboy creates this AnarchySubject via ResourceProvider
+apiVersion: anarchy.gpte.redhat.com/v1
+kind: AnarchySubject
+metadata:
+  name: babylon-openshift-cluster-pool-003
+  namespace: anarchy-operator
+  ownerReferences:
+  - apiVersion: poolboy.gpte.redhat.com/v1
+    kind: ResourceHandle
+    name: babylon-ocp4-pool-003
+    uid: "..."
+spec:
+  governor: babylon
+  parameters:
+    job_vars:
+      guid: "pool-003"
+      env_type: ocp4-cluster
+```
+
+== Performance Tuning
+
+=== Pool Sizing Optimization
+
+**High-Demand Pools**:
+```yaml
+spec:
+  minAvailable: 5
+  maxResources: 50
+
+  autoScale:
+    enabled: true
+    scaleUpTrigger:
+      availablePercent: 30  # Scale up early
+    scaleDownTrigger:
+      availablePercent: 70  # Keep more resources
+      minimumAge: "4h"      # Slower scale down
+```
+
+**Low-Demand Pools**:
+```yaml
+spec:
+  minAvailable: 1
+  maxResources: 10
+
+  autoScale:
+    enabled: true
+    scaleUpTrigger:
+      availablePercent: 10  # Scale up when critically low
+    scaleDownTrigger:
+      availablePercent: 90  # Aggressive scale down
+      minimumAge: "1h"      # Faster scale down
+```
+
+=== Resource Lifecycle Optimization
+
+**Short-Lived Resources**:
+```yaml
+spec:
+  lifespan:
+    default: "2h"
+    maximum: "4h"
+    relative: "1d"
+```
+
+**Long-Lived Resources**:
+```yaml
+spec:
+  lifespan:
+    default: "24h"
+    maximum: "7d"
+    relative: "30d"
+```
+
+=== Operator Performance
+
+**Resource Limits**:
+```yaml
+poolboy:
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 200m
+      memory: 256Mi
+
+  # Concurrent reconciliation
+  workers: 5
+
+  # Reconcile intervals
+  reconcileIntervals:
+    resourcePool: "30s"
+    resourceClaim: "10s"
+    resourceHandle: "60s"
+```
+
+The Poolboy Operator provides efficient resource management through pooling and lifecycle automation, enabling faster resource allocation, improved utilization, and cost optimization through declarative resource management patterns.

@@ -1,0 +1,835 @@
+= Cost Tracker Operator
+
+== Overview
+
+The Cost Tracker Operator is a Kubernetes operator that monitors AWS costs and provides resource allocation tracking for the Babylon platform. It integrates with AWS Cost Explorer and Cost and Usage Reports to track spending, allocate costs to specific workloads, and provide cost optimization recommendations. The operator enables financial visibility and accountability for cloud resource consumption across workshops, demos, and platform operations.
+
+== Architecture
+
+=== Core Components
+
+==== Cost Tracker Controller
+Main operator process that watches for cost tracking custom resources and orchestrates cost monitoring workflows.
+
+==== AWS Integration Layer
+Interfaces with AWS Cost Explorer API, Cost and Usage Reports, and AWS Sandbox Manager for cost data collection.
+
+==== Cost Allocation Engine
+Allocates costs to specific workloads, users, workshops, and organizational units based on resource tagging and usage patterns.
+
+==== Reporting Generator
+Generates cost reports, trends analysis, and budget alerts for different stakeholders.
+
+== Custom Resources
+
+=== CostTrackerState
+
+Represents the overall cost tracking state and configuration.
+
+**Schema**:
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: CostTrackerState
+metadata:
+  name: aws-cost-tracker
+  namespace: babylon-cost-tracker
+spec:
+  # AWS configuration
+  aws:
+    accountId: "123456789012"
+    regions: ["us-east-1", "us-west-2", "eu-west-1"]
+    costAndUsageReportsBucket: "aws-cur-babylon"
+    costAndUsageReportsPrefix: "cur-reports/"
+
+  # Cost tracking configuration
+  tracking:
+    enabled: true
+    granularity: "DAILY"
+    lookbackDays: 30
+    updateFrequency: "6h"
+
+  # Allocation rules
+  allocation:
+    defaultProject: "unallocated"
+    tagMapping:
+      babylon.gpte.redhat.com/catalogItem: "catalog-item"
+      babylon.gpte.redhat.com/workshop: "workshop"
+      babylon.gpte.redhat.com/user: "user"
+      babylon.gpte.redhat.com/instructor: "instructor"
+
+  # Budget configuration
+  budgets:
+  - name: "monthly-platform"
+    amount: 10000.00
+    currency: "USD"
+    period: "MONTHLY"
+    alertThresholds: [50, 80, 100]
+  - name: "workshop-daily"
+    amount: 500.00
+    currency: "USD"
+    period: "DAILY"
+    alertThresholds: [80, 100]
+
+  # Reporting configuration
+  reporting:
+    enabled: true
+    schedule: "0 8 * * *"  # Daily at 8 AM
+    recipients: ["platform-team@example.com"]
+    formats: ["email", "slack"]
+
+status:
+  # Overall tracking status
+  phase: Active
+
+  # Last update information
+  lastUpdate:
+    time: "2023-01-01T08:00:00Z"
+    status: Success
+    recordsProcessed: 15420
+
+  # Current spending
+  currentSpend:
+    today: 234.56
+    monthToDate: 4567.89
+    lastMonth: 8901.23
+
+  # Budget status
+  budgets:
+  - name: "monthly-platform"
+    current: 4567.89
+    target: 10000.00
+    utilizationPercent: 45.68
+    status: "on-track"
+  - name: "workshop-daily"
+    current: 234.56
+    target: 500.00
+    utilizationPercent: 46.91
+    status: "on-track"
+
+  conditions:
+  - type: Ready
+    status: "True"
+    lastTransitionTime: "2023-01-01T08:00:00Z"
+    reason: TrackingActive
+    message: Cost tracking is active and up to date
+```
+
+=== AWSSandboxCost
+
+Tracks costs for individual AWS sandboxes and environments.
+
+**Schema**:
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: AWSSandboxCost
+metadata:
+  name: sandbox-user001-20231201
+  namespace: babylon-cost-tracker
+  labels:
+    babylon.gpte.redhat.com/user: user001
+    babylon.gpte.redhat.com/workshop: openshift-fundamentals
+    babylon.gpte.redhat.com/catalogItem: openshift-cluster
+spec:
+  # Sandbox identification
+  sandbox:
+    accountId: "123456789012"
+    name: "sandbox-user001"
+    owner: "user001"
+
+  # Resource identification
+  resources:
+    tags:
+      babylon.gpte.redhat.com/user: "user001"
+      babylon.gpte.redhat.com/workshop: "openshift-fundamentals"
+      babylon.gpte.redhat.com/guid: "user001-20231201"
+    resourceIds:
+    - "i-0123456789abcdef0"  # EC2 instances
+    - "vol-0123456789abcdef0"  # EBS volumes
+    - "vpc-0123456789abcdef0"  # VPC
+
+  # Tracking period
+  period:
+    start: "2023-12-01T00:00:00Z"
+    end: "2023-12-01T23:59:59Z"
+
+  # Cost allocation
+  allocation:
+    project: "workshops"
+    department: "training"
+    costCenter: "education"
+
+status:
+  # Cost breakdown
+  costs:
+    total: 45.67
+    services:
+      EC2-Instance: 25.34
+      EBS: 8.90
+      VPC: 2.45
+      EC2-Other: 8.98
+
+  # Usage metrics
+  usage:
+    ec2Hours: 24
+    ebsGBHours: 2400
+    dataTransferGB: 12.5
+
+  # Cost trends
+  trends:
+    hourlyAverage: 1.90
+    peakHour: "14:00"
+    peakCost: 3.45
+
+  # Optimization recommendations
+  recommendations:
+  - type: "rightsize"
+    resource: "i-0123456789abcdef0"
+    currentType: "m5.xlarge"
+    recommendedType: "m5.large"
+    potentialSavings: 12.50
+  - type: "schedule"
+    resource: "i-0123456789abcdef0"
+    recommendation: "Stop during nights and weekends"
+    potentialSavings: 18.75
+
+  conditions:
+  - type: Updated
+    status: "True"
+    lastTransitionTime: "2023-12-01T08:00:00Z"
+    reason: CostDataAvailable
+    message: Cost data successfully retrieved and processed
+```
+
+=== CostReport
+
+Generates and manages cost reports for different stakeholders.
+
+**Schema**:
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: CostReport
+metadata:
+  name: monthly-platform-report-202312
+  namespace: babylon-cost-tracker
+spec:
+  # Report configuration
+  type: "monthly-summary"
+  title: "Platform Cost Report - December 2023"
+  description: "Monthly cost summary for Babylon platform operations"
+
+  # Report period
+  period:
+    start: "2023-12-01T00:00:00Z"
+    end: "2023-12-31T23:59:59Z"
+
+  # Report scope
+  scope:
+    accounts: ["123456789012"]
+    regions: ["us-east-1", "us-west-2"]
+    services: ["EC2", "EBS", "VPC", "RDS"]
+
+  # Grouping and filtering
+  groupBy: ["service", "project", "user"]
+  filters:
+    tags:
+      babylon.gpte.redhat.com/platform: "babylon"
+
+  # Output configuration
+  output:
+    format: ["html", "pdf", "csv"]
+    recipients:
+    - email: "platform-team@example.com"
+      format: "html"
+    - email: "finance@example.com"
+      format: "csv"
+    delivery:
+      schedule: "0 9 1 * *"  # Monthly on 1st at 9 AM
+
+status:
+  # Report generation status
+  phase: Complete
+
+  # Generated reports
+  reports:
+  - format: "html"
+    url: "https://reports.babylon.example.com/cost-reports/202312/platform-summary.html"
+    size: "2.5MB"
+    generatedAt: "2023-01-01T09:00:00Z"
+  - format: "csv"
+    url: "https://reports.babylon.example.com/cost-reports/202312/platform-summary.csv"
+    size: "1.2MB"
+    generatedAt: "2023-01-01T09:00:00Z"
+
+  # Report summary
+  summary:
+    totalCost: 8901.23
+    topServices:
+    - name: "EC2-Instance"
+      cost: 5234.56
+      percentage: 58.8
+    - name: "EBS"
+      cost: 1567.89
+      percentage: 17.6
+    topProjects:
+    - name: "workshops"
+      cost: 4567.89
+      percentage: 51.3
+    - name: "demos"
+      cost: 2345.67
+      percentage: 26.3
+
+  conditions:
+  - type: Complete
+    status: "True"
+    lastTransitionTime: "2023-01-01T09:05:00Z"
+    reason: ReportGenerated
+    message: All report formats generated successfully
+```
+
+== Configuration
+
+=== Operator Configuration
+
+The Cost Tracker Operator is configured through environment variables and ConfigMaps:
+
+**Environment Variables**:
+```yaml
+env:
+- name: COST_TRACKER_NAMESPACE
+  value: babylon-cost-tracker
+- name: COST_TRACKER_LOG_LEVEL
+  value: INFO
+- name: COST_TRACKER_METRICS_PORT
+  value: "8080"
+- name: AWS_DEFAULT_REGION
+  value: us-east-1
+- name: AWS_ACCOUNT_ID
+  value: "123456789012"
+- name: COST_EXPLORER_ENDPOINT
+  value: "https://ce.us-east-1.amazonaws.com"
+- name: CUR_S3_BUCKET
+  value: "aws-cur-babylon"
+```
+
+**Helm Configuration**:
+```yaml
+costTracker:
+  image:
+    repository: quay.io/babylon/cost-tracker
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+  # AWS configuration
+  aws:
+    accountId: "123456789012"
+    regions: ["us-east-1", "us-west-2"]
+    costAndUsageReports:
+      enabled: true
+      bucket: "aws-cur-babylon"
+      prefix: "cur-reports/"
+
+  # Cost tracking settings
+  tracking:
+    updateFrequency: "6h"
+    granularity: "DAILY"
+    lookbackDays: 30
+    retentionDays: 365
+
+  # Budget configuration
+  budgets:
+    platform:
+      monthly: 10000.00
+      alertThresholds: [50, 80, 100]
+    workshops:
+      daily: 500.00
+      alertThresholds: [80, 100]
+
+  # Reporting configuration
+  reporting:
+    enabled: true
+    schedule: "0 8 * * *"
+    storage:
+      type: "s3"
+      bucket: "babylon-cost-reports"
+
+  # Notification settings
+  notifications:
+    email:
+      enabled: true
+      smtp:
+        server: "smtp.example.com"
+        port: 587
+        username: "babylon-reports"
+    slack:
+      enabled: true
+      webhook: "https://hooks.slack.com/services/..."
+
+  # Integration settings
+  integrations:
+    awsSandboxManager:
+      enabled: true
+      endpoint: "https://aws-sandbox-manager.example.com"
+    prometheus:
+      enabled: true
+      pushGateway: "http://prometheus-pushgateway:9091"
+```
+
+=== AWS Integration Configuration
+
+**Cost and Usage Reports Setup**:
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aws-cur-config
+  namespace: babylon-cost-tracker
+data:
+  cur-setup.yaml: |
+    costAndUsageReports:
+      reportName: "babylon-platform-cur"
+      s3Bucket: "aws-cur-babylon"
+      s3Prefix: "cur-reports/"
+      timeUnit: "HOURLY"
+      format: "Parquet"
+      compression: "GZIP"
+      additionalSchemaElements:
+      - "RESOURCES"
+      - "SPLIT_COST_ALLOCATION_DATA"
+      reportVersioning: "OVERWRITE_REPORT"
+
+    costExplorer:
+      granularity: "DAILY"
+      metrics: ["BlendedCost", "UsageQuantity"]
+      groupBy: ["SERVICE", "DIMENSION"]
+      dimensions: ["SERVICE", "LINKED_ACCOUNT", "REGION"]
+```
+
+**AWS IAM Policy**:
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ce:GetCostAndUsage",
+        "ce:GetDimensionValues",
+        "ce:GetReservationCoverage",
+        "ce:GetReservationPurchaseRecommendation",
+        "ce:GetReservationUtilization",
+        "ce:GetUsageReport",
+        "ce:DescribeCostCategoryDefinition",
+        "ce:GetRightsizingRecommendation"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::aws-cur-babylon",
+        "arn:aws:s3:::aws-cur-babylon/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "budgets:DescribeBudgets",
+        "budgets:DescribeBudgetAction*"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+== Operations
+
+=== Managing Cost Tracking
+
+**Enable Cost Tracking**:
+```bash
+# Apply cost tracker configuration
+kubectl apply -f cost-tracker-state.yaml
+
+# Check tracking status
+kubectl get costtrackerstate aws-cost-tracker -n babylon-cost-tracker -o yaml
+
+# Monitor cost updates
+kubectl get costtrackerstate aws-cost-tracker -n babylon-cost-tracker -w
+```
+
+**Check Current Costs**:
+```bash
+# Get current spending
+kubectl get costtrackerstate aws-cost-tracker -n babylon-cost-tracker \
+  -o jsonpath='{.status.currentSpend}'
+
+# Check budget status
+kubectl get costtrackerstate aws-cost-tracker -n babylon-cost-tracker \
+  -o jsonpath='{.status.budgets}'
+
+# List cost alerts
+kubectl get events -n babylon-cost-tracker --field-selector type=Warning
+```
+
+**Update Tracking Configuration**:
+```bash
+# Change update frequency
+kubectl patch costtrackerstate aws-cost-tracker -n babylon-cost-tracker --type='merge' \
+  -p='{"spec":{"tracking":{"updateFrequency":"3h"}}}'
+
+# Add new budget
+kubectl patch costtrackerstate aws-cost-tracker -n babylon-cost-tracker --type='merge' \
+  -p='{"spec":{"budgets":[{"name":"demo-weekly","amount":1000.00,"currency":"USD","period":"WEEKLY","alertThresholds":[80,100]}]}}'
+```
+
+=== Managing Sandbox Costs
+
+**Track Sandbox Costs**:
+```bash
+# List sandbox costs
+kubectl get awssandboxcosts -n babylon-cost-tracker
+
+# Filter by user
+kubectl get awssandboxcosts -n babylon-cost-tracker \
+  -l babylon.gpte.redhat.com/user=user001
+
+# Filter by workshop
+kubectl get awssandboxcosts -n babylon-cost-tracker \
+  -l babylon.gpte.redhat.com/workshop=openshift-fundamentals
+```
+
+**Check Sandbox Cost Details**:
+```bash
+# Get detailed cost breakdown
+kubectl get awssandboxcost sandbox-user001-20231201 -n babylon-cost-tracker \
+  -o jsonpath='{.status.costs}'
+
+# Check optimization recommendations
+kubectl get awssandboxcost sandbox-user001-20231201 -n babylon-cost-tracker \
+  -o jsonpath='{.status.recommendations}'
+
+# Monitor cost trends
+kubectl get awssandboxcost sandbox-user001-20231201 -n babylon-cost-tracker \
+  -o jsonpath='{.status.trends}'
+```
+
+**Bulk Cost Analysis**:
+```bash
+# Get total costs by workshop
+kubectl get awssandboxcosts -n babylon-cost-tracker \
+  -o jsonpath='{.items[*].metadata.labels.babylon\.gpte\.redhat\.com/workshop}' | \
+  sort | uniq -c
+
+# Calculate workshop costs
+for workshop in $(kubectl get awssandboxcosts -n babylon-cost-tracker \
+  -o jsonpath='{.items[*].metadata.labels.babylon\.gpte\.redhat\.com/workshop}' | \
+  sort | uniq); do
+  echo -n "$workshop: "
+  kubectl get awssandboxcosts -n babylon-cost-tracker \
+    -l babylon.gpte.redhat.com/workshop=$workshop \
+    -o jsonpath='{.items[*].status.costs.total}' | \
+    awk '{sum+=$1} END {print sum}'
+done
+```
+
+=== Managing Cost Reports
+
+**Generate Cost Reports**:
+```bash
+# Create monthly report
+cat <<EOF | kubectl apply -f -
+apiVersion: babylon.gpte.redhat.com/v1
+kind: CostReport
+metadata:
+  name: monthly-platform-report-$(date +%Y%m)
+  namespace: babylon-cost-tracker
+spec:
+  type: "monthly-summary"
+  title: "Platform Cost Report - $(date +"%B %Y")"
+  period:
+    start: "$(date -d "1 month ago" +%Y-%m-01T00:00:00Z)"
+    end: "$(date +%Y-%m-01T00:00:00Z)"
+  groupBy: ["service", "project"]
+  output:
+    format: ["html", "csv"]
+EOF
+
+# Check report status
+kubectl get costreport monthly-platform-report-$(date +%Y%m) -n babylon-cost-tracker -o yaml
+
+# List generated reports
+kubectl get costreports -n babylon-cost-tracker
+```
+
+**Schedule Recurring Reports**:
+```bash
+# Create weekly workshop report
+cat <<EOF | kubectl apply -f -
+apiVersion: babylon.gpte.redhat.com/v1
+kind: CostReport
+metadata:
+  name: weekly-workshop-report
+  namespace: babylon-cost-tracker
+spec:
+  type: "workshop-summary"
+  title: "Weekly Workshop Costs"
+  scope:
+    filters:
+      tags:
+        babylon.gpte.redhat.com/category: "workshops"
+  groupBy: ["workshop", "user"]
+  output:
+    delivery:
+      schedule: "0 9 * * 1"  # Monday at 9 AM
+    recipients:
+    - email: "workshop-team@example.com"
+      format: "html"
+EOF
+```
+
+=== Cost Optimization
+
+**Get Optimization Recommendations**:
+```bash
+# List all recommendations
+kubectl get awssandboxcosts -n babylon-cost-tracker \
+  -o jsonpath='{.items[*].status.recommendations[*]}' | jq .
+
+# Filter by recommendation type
+kubectl get awssandboxcosts -n babylon-cost-tracker \
+  -o json | jq '.items[].status.recommendations[]? | select(.type=="rightsize")'
+
+# Calculate total potential savings
+kubectl get awssandboxcosts -n babylon-cost-tracker \
+  -o json | jq '.items[].status.recommendations[]?.potentialSavings' | \
+  awk '{sum+=$1} END {print "Total potential savings: $" sum}'
+```
+
+**Monitor Cost Trends**:
+```bash
+# Check daily cost trends
+kubectl get costtrackerstate aws-cost-tracker -n babylon-cost-tracker \
+  -o jsonpath='{.status.currentSpend}'
+
+# Export cost data for analysis
+kubectl get awssandboxcosts -n babylon-cost-tracker \
+  -o json | jq -r '.items[] | [.metadata.labels."babylon.gpte.redhat.com/workshop", .status.costs.total] | @csv' > workshop-costs.csv
+```
+
+=== Troubleshooting
+
+**Check Operator Health**:
+```bash
+# Check operator deployment
+kubectl get deployment cost-tracker -n babylon-cost-tracker
+
+# Check operator logs
+kubectl logs deployment/cost-tracker -n babylon-cost-tracker
+
+# Check AWS connectivity
+kubectl exec deployment/cost-tracker -n babylon-cost-tracker -- \
+  aws ce get-cost-and-usage --time-period Start=2023-01-01,End=2023-01-02 --granularity DAILY --metrics BlendedCost
+```
+
+**Debug Cost Data Issues**:
+```bash
+# Check AWS credentials
+kubectl get secret aws-credentials -n babylon-cost-tracker -o yaml
+
+# Test Cost Explorer API
+kubectl exec deployment/cost-tracker -n babylon-cost-tracker -- \
+  aws ce get-dimension-values --dimension SERVICE --time-period Start=2023-01-01,End=2023-01-02
+
+# Check S3 access for CUR data
+kubectl exec deployment/cost-tracker -n babylon-cost-tracker -- \
+  aws s3 ls s3://aws-cur-babylon/cur-reports/
+```
+
+**Debug Report Generation**:
+```bash
+# Check report generation logs
+kubectl logs -l app=cost-report-generator -n babylon-cost-tracker
+
+# Check report storage
+kubectl exec deployment/cost-tracker -n babylon-cost-tracker -- \
+  aws s3 ls s3://babylon-cost-reports/
+
+# Validate report data
+kubectl get costreport monthly-platform-report-202312 -n babylon-cost-tracker \
+  -o jsonpath='{.status.summary}'
+```
+
+== Integration Patterns
+
+=== With AWS Sandbox Manager
+
+Cost Tracker integrates with AWS Sandbox Manager for automated cost allocation:
+
+```yaml
+# Cost tracking triggered by sandbox events
+apiVersion: v1
+kind: Event
+metadata:
+  name: sandbox-created
+  namespace: babylon-cost-tracker
+type: Normal
+reason: SandboxCreated
+involvedObject:
+  apiVersion: anarchy.gpte.redhat.com/v1
+  kind: AnarchySubject
+  name: sandbox-user001
+message: "AWS sandbox created for user001"
+
+# Automatic AWSSandboxCost creation
+---
+apiVersion: babylon.gpte.redhat.com/v1
+kind: AWSSandboxCost
+metadata:
+  name: sandbox-user001-$(date +%Y%m%d)
+  namespace: babylon-cost-tracker
+  ownerReferences:
+  - apiVersion: anarchy.gpte.redhat.com/v1
+    kind: AnarchySubject
+    name: sandbox-user001
+spec:
+  sandbox:
+    name: sandbox-user001
+    owner: user001
+  resources:
+    tags:
+      babylon.gpte.redhat.com/user: user001
+      babylon.gpte.redhat.com/anarchySubject: sandbox-user001
+```
+
+=== With Prometheus Monitoring
+
+Cost metrics are exported to Prometheus for dashboards and alerting:
+
+```yaml
+# Prometheus metrics configuration
+costTracker:
+  prometheus:
+    enabled: true
+    metrics:
+    - name: babylon_cost_total
+      help: "Total cost for Babylon platform"
+      type: gauge
+      labels: ["account", "service", "project"]
+    - name: babylon_budget_utilization
+      help: "Budget utilization percentage"
+      type: gauge
+      labels: ["budget_name", "period"]
+    - name: babylon_workshop_cost
+      help: "Cost per workshop"
+      type: gauge
+      labels: ["workshop", "catalog_item", "instructor"]
+```
+
+=== With Notification Systems
+
+Cost alerts and reports are delivered through multiple channels:
+
+```bash
+# Email notification for budget alerts
+kubectl create secret generic smtp-credentials -n babylon-cost-tracker \
+  --from-literal=username=babylon-reports \
+  --from-literal=password=smtp-password
+
+# Slack webhook for real-time alerts
+kubectl create secret generic slack-webhook -n babylon-cost-tracker \
+  --from-literal=webhook-url=https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX
+```
+
+== Performance Tuning
+
+=== Data Processing Optimization
+
+**Efficient Cost Data Retrieval**:
+```yaml
+costTracker:
+  aws:
+    # Batch processing
+    batchSize: 1000
+    maxConcurrentRequests: 10
+
+    # Caching
+    enableCaching: true
+    cacheTTL: "1h"
+
+    # Rate limiting
+    rateLimiting:
+      requestsPerSecond: 5
+      burstSize: 20
+```
+
+**Cost Allocation Optimization**:
+```yaml
+costTracker:
+  allocation:
+    # Parallel processing
+    workers: 5
+
+    # Memory optimization
+    batchSize: 500
+    streamProcessing: true
+
+    # Indexing
+    enableIndexing: true
+    indexFields: ["user", "workshop", "catalog_item"]
+```
+
+=== Report Generation Optimization
+
+**Efficient Report Processing**:
+```yaml
+costTracker:
+  reporting:
+    # Parallel report generation
+    maxConcurrentReports: 3
+
+    # Template caching
+    templateCaching: true
+    templateCacheTTL: "24h"
+
+    # Compression
+    enableCompression: true
+    compressionLevel: 6
+```
+
+=== Storage Optimization
+
+**Cost Data Retention**:
+```yaml
+costTracker:
+  storage:
+    # Data lifecycle
+    retentionPolicy:
+      daily: "90d"
+      monthly: "2y"
+      yearly: "7y"
+
+    # Compression
+    enableCompression: true
+    compressionSchedule: "0 2 * * 0"  # Weekly
+
+    # Archival
+    archival:
+      enabled: true
+      storageClass: "GLACIER"
+      archiveAfter: "1y"
+```
+
+The Cost Tracker Operator provides comprehensive AWS cost monitoring and allocation capabilities, enabling financial transparency, budget management, and cost optimization across the Babylon platform's cloud resource consumption.

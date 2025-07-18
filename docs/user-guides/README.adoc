@@ -1,0 +1,142 @@
+= User Guides Overview
+
+== Introduction
+
+The Babylon Platform serves multiple user personas, each with distinct needs and workflows. This section provides comprehensive guides tailored to each user type, from platform administrators to end-users participating in workshops.
+
+== User Personas
+
+=== Platform Administrators
+**Role**: Manage and operate the Babylon Platform infrastructure
+
+**Responsibilities**:
+* Platform deployment and configuration
+* User access management and RBAC
+* Monitoring and troubleshooting
+* Capacity planning and scaling
+* Security and compliance
+
+**Guide**: link:administrators.adoc[Administrator Guide]
+
+=== Workshop Instructors
+**Role**: Create and manage educational workshops and training programs
+
+**Responsibilities**:
+* Workshop design and configuration
+* Catalog item creation and maintenance
+* Participant management
+* Workshop delivery and monitoring
+* Content updates and versioning
+
+**Guide**: link:instructors.adoc[Instructor Guide]
+
+=== End Users (Workshop Participants)
+**Role**: Participate in workshops and access lab environments
+
+**Responsibilities**:
+* Request lab environments
+* Access workshop materials
+* Complete lab exercises
+* Provide feedback and ratings
+
+**Guide**: link:end-users.adoc[End User Guide]
+
+== Common Workflows
+
+=== Getting Started Workflow
+1. **Platform Administrator**: Deploy and configure Babylon Platform
+2. **Platform Administrator**: Set up user authentication and permissions
+3. **Instructor**: Create workshop and catalog items
+4. **Instructor**: Configure workshop parameters and scheduling
+5. **End User**: Register for workshop and access lab environment
+6. **End User**: Complete workshop exercises and provide feedback
+
+=== Content Management Workflow
+1. **Instructor**: Design workshop content and lab exercises
+2. **Platform Administrator**: Review and approve catalog items
+3. **Instructor**: Test workshop in staging environment
+4. **Platform Administrator**: Promote to production catalog
+5. **Instructor**: Schedule workshop delivery
+6. **End User**: Access and complete workshop
+
+=== Operations Workflow
+1. **Platform Administrator**: Monitor platform health and usage
+2. **Platform Administrator**: Manage resource capacity and scaling
+3. **Instructor**: Monitor workshop progress and participant engagement
+4. **Platform Administrator**: Generate usage reports and metrics
+5. **Platform Administrator**: Plan maintenance and updates
+
+== Navigation Guide
+
+=== By User Type
+Choose your guide based on your primary role:
+
+* **New to Babylon?** Start with the link:end-users.adoc[End User Guide] to understand basic concepts
+* **Managing the platform?** See the link:administrators.adoc[Administrator Guide] for operational procedures
+* **Creating workshops?** Follow the link:instructors.adoc[Instructor Guide] for content creation
+
+=== By Task
+Find specific tasks across all guides:
+
+==== Authentication and Access
+* Administrator: link:administrators.adoc#user-management[User Management]
+* Instructor: link:instructors.adoc#workshop-access[Workshop Access Control]
+* End User: link:end-users.adoc#logging-in[Logging In]
+
+==== Workshop Management
+* Administrator: link:administrators.adoc#workshop-operations[Workshop Operations]
+* Instructor: link:instructors.adoc#creating-workshops[Creating Workshops]
+* End User: link:end-users.adoc#joining-workshops[Joining Workshops]
+
+==== Resource Management
+* Administrator: link:administrators.adoc#resource-management[Resource Management]
+* Instructor: link:instructors.adoc#resource-planning[Resource Planning]
+* End User: link:end-users.adoc#accessing-resources[Accessing Resources]
+
+==== Troubleshooting
+* Administrator: link:administrators.adoc#troubleshooting[System Troubleshooting]
+* Instructor: link:instructors.adoc#workshop-troubleshooting[Workshop Issues]
+* End User: link:end-users.adoc#getting-help[Getting Help]
+
+== Quick Reference
+
+=== Common URLs
+* **Catalog Interface**: `https://catalog.babylon.example.com`
+* **Admin Interface**: `https://admin.babylon.example.com`
+* **Workshop Portal**: `https://workshops.babylon.example.com`
+* **Status Page**: `https://status.babylon.example.com`
+
+=== Key Concepts
+* **Catalog Item**: A service or environment template available for provisioning
+* **Workshop**: A structured learning experience with multiple participants
+* **Resource Claim**: A request for infrastructure resources
+* **Lab Interface**: Web-based access to workshop materials and environments
+* **Workshop Provision**: Bulk provisioning of environments for workshop delivery
+
+=== Support Channels
+* **Documentation**: This comprehensive guide
+* **Platform Issues**: Contact platform administrators
+* **Workshop Support**: Contact workshop instructors
+* **Technical Support**: Submit tickets through admin interface
+
+== Getting Started Quickly
+
+=== For Administrators
+1. Read the link:../deployment/README.adoc[Deployment Guide]
+2. Follow the link:administrators.adoc#initial-setup[Initial Setup] procedures
+3. Configure link:administrators.adoc#user-authentication[User Authentication]
+4. Set up link:administrators.adoc#monitoring[Monitoring and Alerting]
+
+=== For Instructors
+1. Request access from platform administrators
+2. Review link:instructors.adoc#catalog-concepts[Catalog Concepts]
+3. Follow link:instructors.adoc#first-workshop[Creating Your First Workshop]
+4. Learn about link:instructors.adoc#best-practices[Best Practices]
+
+=== For End Users
+1. Get login credentials from workshop organizer
+2. Follow link:end-users.adoc#first-time-access[First-Time Access] steps
+3. Learn about link:end-users.adoc#lab-environments[Lab Environments]
+4. Understand link:end-users.adoc#workshop-etiquette[Workshop Etiquette]
+
+These user guides provide role-specific information to ensure all users can effectively leverage the Babylon Platform for their educational and operational needs.

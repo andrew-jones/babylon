@@ -1,0 +1,912 @@
+= Administrator Guide
+
+== Overview
+
+This guide provides comprehensive instructions for Babylon Platform administrators responsible for platform configuration, user management, catalog management, and overall platform operations. It covers both day-to-day administrative tasks and advanced configuration scenarios.
+
+== Getting Started
+
+=== Administrator Access
+
+==== Prerequisites
+* OpenShift cluster access with appropriate permissions
+* Understanding of Kubernetes/OpenShift concepts
+* Basic knowledge of YAML configuration
+* Access to platform monitoring and logging tools
+
+==== Required Permissions
+Administrators need the following cluster-level permissions:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: babylon-administrator
+rules:
+- apiGroups: ["babylon.gpte.redhat.com"]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["poolboy.gpte.redhat.com"]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["anarchy.gpte.redhat.com"]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: [""]
+  resources: ["namespaces", "secrets", "configmaps"]
+  verbs: ["get", "list", "create", "update", "patch", "delete"]
+```
+
+==== Accessing the Admin UI
+```bash
+# Get the admin UI URL
+oc get route babylon-admin-ui -n babylon-admin -o jsonpath='{.spec.host}'
+
+# Example: https://admin.babylon.example.com
+```
+
+=== Initial Setup Verification
+
+==== Platform Health Check
+```bash
+# Verify all core components are running
+oc get pods -n babylon-catalog
+oc get pods -n babylon-admin
+oc get pods -n babylon-ratings
+oc get pods -n babylon-agnosticv-operator
+oc get pods -n poolboy
+oc get pods -n anarchy-operator
+
+# Check operator status
+oc get deployments -A -l babylon.gpte.redhat.com/platform=babylon
+```
+
+==== Access Control Verification
+```bash
+# Verify your administrative access
+oc auth can-i "*" catalogitems.babylon.gpte.redhat.com
+oc auth can-i "*" resourceclaims.poolboy.gpte.redhat.com
+oc auth can-i create namespaces
+
+# Test API access
+curl -H "Authorization: Bearer $(oc whoami -t)" \
+  https://admin.babylon.example.com/api/admin/v1/status
+```
+
+== User Management
+
+=== Creating User Namespaces
+
+==== Standard User Namespace
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: user-johndoe-workspace
+  labels:
+    babylon.gpte.redhat.com/user: johndoe
+    babylon.gpte.redhat.com/type: user-workspace
+  annotations:
+    babylon.gpte.redhat.com/display-name: "John Doe's Workspace"
+    babylon.gpte.redhat.com/quota-profile: standard
+spec: {}
+```
+
+```bash
+# Apply user namespace
+oc apply -f user-namespace.yaml
+
+# Set up RBAC for user
+oc create rolebinding user-johndoe-admin \
+  --clusterrole=babylon-user \
+  --user=johndoe \
+  --namespace=user-johndoe-workspace
+```
+
+==== Instructor Namespace
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: user-instructor-advanced-openshift
+  labels:
+    babylon.gpte.redhat.com/user: instructor-jane
+    babylon.gpte.redhat.com/type: instructor-workspace
+    babylon.gpte.redhat.com/course: advanced-openshift
+  annotations:
+    babylon.gpte.redhat.com/display-name: "Advanced OpenShift Course"
+    babylon.gpte.redhat.com/quota-profile: instructor
+    babylon.gpte.redhat.com/max-students: "50"
+spec: {}
+```
+
+=== User Quota Management
+
+==== Quota Profiles
+```yaml
+# Standard user quota
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: user-quota-standard
+  namespace: user-johndoe-workspace
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    requests.storage: 100Gi
+    resourceclaims.poolboy.gpte.redhat.com: "5"
+    persistentvolumeclaims: "10"
+    count/pods: "20"
+
+---
+# Instructor quota
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: instructor-quota
+  namespace: user-instructor-advanced-openshift
+spec:
+  hard:
+    requests.cpu: "50"
+    requests.memory: 100Gi
+    requests.storage: 1Ti
+    resourceclaims.poolboy.gpte.redhat.com: "50"
+    persistentvolumeclaims: "100"
+    count/pods: "200"
+```
+
+==== Quota Monitoring
+```bash
+# Monitor quota usage across all user namespaces
+oc get resourcequotas -A | grep -E "(user-|instructor-)"
+
+# Detailed quota usage for specific user
+oc describe resourcequota -n user-johndoe-workspace
+
+# Find users approaching quota limits
+oc get resourcequotas -A -o custom-columns=NAMESPACE:.metadata.namespace,CPU:.status.used.requests\.cpu,MEMORY:.status.used.requests\.memory,CLAIMS:.status.used.resourceclaims\.poolboy\.gpte\.redhat\.com --no-headers | awk '($2+0)/($5+0) > 0.8 {print "High usage:", $1}'
+```
+
+=== Role-Based Access Control
+
+==== User Roles
+```yaml
+# Standard user role
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: babylon-user
+rules:
+- apiGroups: ["babylon.gpte.redhat.com"]
+  resources: ["catalogitems"]
+  verbs: ["get", "list"]
+- apiGroups: ["poolboy.gpte.redhat.com"]
+  resources: ["resourceclaims"]
+  verbs: ["create", "get", "list", "update", "patch", "delete"]
+  resourceNames: [] # Users can only manage their own claims
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["get", "list"]
+
+---
+# Instructor role
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: babylon-instructor
+rules:
+- apiGroups: ["babylon.gpte.redhat.com"]
+  resources: ["catalogitems", "workshops"]
+  verbs: ["get", "list", "create", "update", "patch", "delete"]
+- apiGroups: ["poolboy.gpte.redhat.com"]
+  resources: ["resourceclaims"]
+  verbs: ["*"]
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["create"]
+  resourceNames: [] # Limited to their course namespaces
+```
+
+==== Dynamic Role Assignment
+```bash
+# Promote user to instructor
+oc create clusterrolebinding instructor-jane \
+  --clusterrole=babylon-instructor \
+  --user=jane@example.com
+
+# Grant course-specific permissions
+oc create rolebinding course-admin \
+  --clusterrole=admin \
+  --user=jane@example.com \
+  --namespace=user-instructor-advanced-openshift
+
+# Temporary elevated access (24 hours)
+oc create rolebinding temp-admin-john \
+  --clusterrole=babylon-administrator \
+  --user=john@example.com \
+  --namespace=user-johndoe-workspace
+
+# Schedule removal (requires external scheduler)
+echo "oc delete rolebinding temp-admin-john -n user-johndoe-workspace" | at now + 24 hours
+```
+
+== Catalog Management
+
+=== Catalog Item Administration
+
+==== Creating Catalog Items
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: CatalogItem
+metadata:
+  name: advanced-openshift-workshop
+  namespace: babylon-catalog-training
+  labels:
+    babylon.gpte.redhat.com/category: workshops
+    babylon.gpte.redhat.com/provider: redhat-training
+spec:
+  displayName: "Advanced OpenShift Workshop"
+  description: "Deep dive into advanced OpenShift concepts and administration"
+  longDescription: |
+    This comprehensive workshop covers advanced OpenShift topics including:
+    - Advanced networking and security
+    - Operator development
+    - GitOps and CI/CD pipelines
+    - Monitoring and observability
+    - Performance tuning
+
+  # Visual elements
+  icon: "data:image/svg+xml;base64,PHN2Zy4uLg=="
+  keywords: ["openshift", "advanced", "administration", "operators"]
+
+  # Categorization
+  category: workshops
+  provider:
+    name: redhat-training
+    displayName: "Red Hat Training"
+
+  # Resource requirements
+  runtime:
+    estimatedTime: "6h"
+    difficulty: "advanced"
+    prerequisites:
+      - "openshift-fundamentals"
+      - "container-platforms"
+
+  # Lifespan configuration
+  lifespan:
+    default: "8h"
+    maximum: "24h"
+    relativeMaximum: "7d"
+
+  # Provisioning parameters
+  parameters:
+    - name: user_count
+      displayName: "Number of Students"
+      description: "Number of student environments to provision"
+      type: integer
+      default: 1
+      minimum: 1
+      maximum: 50
+      required: true
+
+    - name: cluster_size
+      displayName: "Cluster Size"
+      description: "OpenShift cluster node configuration"
+      type: string
+      default: "medium"
+      enum: ["small", "medium", "large"]
+      enumDisplay:
+        small: "Small (3 nodes, 16 vCPU, 64GB RAM)"
+        medium: "Medium (6 nodes, 32 vCPU, 128GB RAM)"
+        large: "Large (9 nodes, 48 vCPU, 192GB RAM)"
+      required: false
+
+    - name: enable_monitoring
+      displayName: "Enable Advanced Monitoring"
+      description: "Deploy Prometheus, Grafana, and alerting stack"
+      type: boolean
+      default: true
+      required: false
+
+  # Resource specifications
+  resources:
+    cpu: "4 cores per student"
+    memory: "16GB per student"
+    storage: "200GB per student"
+    estimatedCost: "$5.00/hour per student"
+
+  # Integration configuration
+  integration:
+    agnosticv:
+      repo: "https://github.com/redhat-cop/agnosticd"
+      path: "ansible/configs/advanced-openshift"
+      ref: "development"
+
+    poolboy:
+      resourceProvider: "aws-advanced"
+      requiresPool: true
+
+  # Access control
+  accessControl:
+    allowedRoles: ["instructor", "administrator"]
+    requireApproval: true
+    approvalWorkflow: "training-approval"
+```
+
+==== Catalog Item Lifecycle Management
+```bash
+# Deploy new catalog item
+oc apply -f advanced-openshift-workshop.yaml
+
+# Verify catalog item status
+oc get catalogitem advanced-openshift-workshop -n babylon-catalog-training -o yaml
+
+# Test catalog item provisioning
+oc apply -f - <<EOF
+apiVersion: poolboy.gpte.redhat.com/v1
+kind: ResourceClaim
+metadata:
+  name: test-advanced-workshop
+  namespace: admin-test-workspace
+spec:
+  resources:
+  - provider:
+      name: babylon
+      namespace: poolboy
+    template:
+      apiVersion: babylon.gpte.redhat.com/v1
+      kind: CatalogItem
+      metadata:
+        name: advanced-openshift-workshop
+        namespace: babylon-catalog-training
+      spec:
+        parameters:
+          user_count: 1
+          cluster_size: small
+          enable_monitoring: false
+EOF
+
+# Monitor test provision
+oc get resourceclaim test-advanced-workshop -n admin-test-workspace -w
+
+# Promote to production catalog
+oc label catalogitem advanced-openshift-workshop -n babylon-catalog-training \
+  babylon.gpte.redhat.com/environment=production
+
+# Clean up test
+oc delete resourceclaim test-advanced-workshop -n admin-test-workspace
+```
+
+=== Catalog Organization
+
+==== Category Management
+```bash
+# List all catalog categories
+oc get catalogitems -A -o jsonpath='{.items[*].spec.category}' | tr ' ' '\n' | sort -u
+
+# Reorganize catalog items by category
+CATEGORIES=("workshops" "demos" "labs" "assessments" "certifications")
+
+for category in "${CATEGORIES[@]}"; do
+  echo "=== $category ==="
+  oc get catalogitems -A -l babylon.gpte.redhat.com/category=$category \
+    -o custom-columns=NAME:.metadata.name,NAMESPACE:.metadata.namespace,DISPLAY:.spec.displayName
+done
+
+# Create category-specific namespaces
+for category in "${CATEGORIES[@]}"; do
+  oc create namespace babylon-catalog-$category 2>/dev/null || true
+  oc label namespace babylon-catalog-$category \
+    babylon.gpte.redhat.com/catalog-category=$category
+done
+```
+
+==== Catalog Publishing Workflow
+```yaml
+# Catalog promotion pipeline
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: catalog-item-promotion
+  namespace: babylon-catalog-ci
+spec:
+  params:
+  - name: catalog-item-name
+    type: string
+  - name: source-namespace
+    type: string
+  - name: target-namespace
+    type: string
+
+  tasks:
+  - name: validate-catalog-item
+    taskRef:
+      name: validate-babylon-catalog-item
+    params:
+    - name: item-name
+      value: $(params.catalog-item-name)
+    - name: namespace
+      value: $(params.source-namespace)
+
+  - name: test-provision
+    taskRef:
+      name: test-catalog-item-provision
+    params:
+    - name: item-name
+      value: $(params.catalog-item-name)
+    - name: namespace
+      value: $(params.source-namespace)
+    runAfter: ["validate-catalog-item"]
+
+  - name: promote-to-production
+    taskRef:
+      name: promote-catalog-item
+    params:
+    - name: item-name
+      value: $(params.catalog-item-name)
+    - name: source-namespace
+      value: $(params.source-namespace)
+    - name: target-namespace
+      value: $(params.target-namespace)
+    runAfter: ["test-provision"]
+```
+
+== Platform Configuration
+
+=== Resource Provider Management
+
+==== AWS Resource Provider
+```yaml
+apiVersion: poolboy.gpte.redhat.com/v1
+kind: ResourceProvider
+metadata:
+  name: aws-production
+  namespace: poolboy
+spec:
+  displayName: "AWS Production Environment"
+  description: "Production AWS environment for customer workshops"
+
+  # Provider configuration
+  provider:
+    apiVersion: anarchy.gpte.redhat.com/v1
+    kind: AnarchyGovernor
+    name: aws-sandbox
+    namespace: anarchy-operator
+
+  # Resource defaults
+  default:
+    spec:
+      parameters:
+        aws_region: "us-east-1"
+        aws_instance_type: "m5.xlarge"
+        subdomain_base: "example.opentlc.com"
+
+  # Validation rules
+  validation:
+    openAPIV3Schema:
+      type: object
+      properties:
+        parameters:
+          type: object
+          properties:
+            aws_region:
+              type: string
+              enum: ["us-east-1", "us-west-2", "eu-west-1"]
+            user_count:
+              type: integer
+              minimum: 1
+              maximum: 100
+
+  # Resource limits
+  limits:
+    maxConcurrent: 50
+    maxDaily: 200
+
+  # Cost controls
+  costManagement:
+    budgetAlert: "$1000"
+    budgetLimit: "$5000"
+    costPerHour: "$2.50"
+```
+
+==== Resource Pool Configuration
+```yaml
+apiVersion: poolboy.gpte.redhat.com/v1
+kind: ResourcePool
+metadata:
+  name: openshift-workshop-pool
+  namespace: poolboy
+spec:
+  displayName: "OpenShift Workshop Pool"
+
+  # Pool sizing
+  minAvailable: 5
+  maxSize: 20
+  targetSize: 10
+
+  # Resource template
+  resources:
+  - provider:
+      name: aws-production
+      namespace: poolboy
+    template:
+      apiVersion: babylon.gpte.redhat.com/v1
+      kind: CatalogItem
+      metadata:
+        name: openshift-fundamentals
+        namespace: babylon-catalog-workshops
+      spec:
+        parameters:
+          user_count: 1
+          openshift_version: "4.12"
+          aws_region: "us-east-1"
+
+  # Lifecycle management
+  lifespan:
+    default: "4h"
+    maximum: "8h"
+    unclaimed: "1h"
+
+  # Scaling policies
+  scaling:
+    scaleUpTrigger:
+      available: 2
+      pending: 3
+    scaleDownTrigger:
+      available: 8
+      age: "2h"
+```
+
+=== Integration Configuration
+
+==== AgnosticD Integration
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: AgnosticVRepo
+metadata:
+  name: redhat-cop-agnosticd
+  namespace: babylon-agnosticv-operator
+spec:
+  displayName: "Red Hat CoP AgnosticD"
+  description: "Primary AgnosticD repository for workshop content"
+
+  # Git repository configuration
+  git:
+    url: "https://github.com/redhat-cop/agnosticd"
+    ref: "development"
+
+  # Sync configuration
+  syncPolicy:
+    automated: true
+    interval: "1h"
+    prune: true
+
+  # Path filtering
+  include:
+    - "ansible/configs/*/metadata.yml"
+    - "ansible/configs/*/README.adoc"
+
+  exclude:
+    - "ansible/configs/archive/*"
+    - "ansible/configs/test/*"
+
+  # Validation
+  validation:
+    enabled: true
+    strict: false
+
+  # Access control
+  accessControl:
+    allowedNamespaces:
+    - "babylon-catalog-workshops"
+    - "babylon-catalog-demos"
+```
+
+==== External System Integration
+```yaml
+# LDAP integration for user management
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ldap-integration-config
+  namespace: babylon-config
+data:
+  ldap.yaml: |
+    ldap:
+      server: "ldap://ldap.example.com:389"
+      baseDN: "dc=example,dc=com"
+      userDN: "ou=people,dc=example,dc=com"
+      groupDN: "ou=groups,dc=example,dc=com"
+
+      attributes:
+        username: "uid"
+        email: "mail"
+        displayName: "cn"
+
+      groups:
+        instructors: "cn=instructors,ou=groups,dc=example,dc=com"
+        administrators: "cn=babylon-admins,ou=groups,dc=example,dc=com"
+
+      sync:
+        interval: "6h"
+        enabled: true
+
+---
+# ServiceNow integration for incident management
+apiVersion: v1
+kind: Secret
+metadata:
+  name: servicenow-integration
+  namespace: babylon-admin
+type: Opaque
+stringData:
+  endpoint: "https://company.service-now.com/api"
+  username: "babylon-integration"
+  password: "secure-password"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: servicenow-config
+  namespace: babylon-admin
+data:
+  config.yaml: |
+    servicenow:
+      incident:
+        autoCreate: true
+        assignmentGroup: "Cloud Platform Team"
+        category: "Infrastructure"
+        subcategory: "Cloud Services"
+
+      escalation:
+        criticalTime: "30m"
+        warningTime: "2h"
+```
+
+== Monitoring and Alerting
+
+=== Platform Metrics Configuration
+
+==== Custom Metrics Collection
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: babylon-metrics-config
+  namespace: babylon-monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 30s
+      evaluation_interval: 30s
+
+    rule_files:
+    - "/etc/prometheus/rules/*.yml"
+
+    scrape_configs:
+    - job_name: 'babylon-catalog-api'
+      kubernetes_sd_configs:
+      - role: endpoints
+        namespaces:
+          names: ['babylon-catalog']
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_service_name]
+        action: keep
+        regex: babylon-catalog-api
+
+    - job_name: 'babylon-operators'
+      kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: ['babylon-agnosticv-operator', 'poolboy', 'anarchy-operator']
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        action: keep
+        regex: (babylon-agnosticv-operator|poolboy|anarchy-operator)
+```
+
+==== Alert Rule Configuration
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: babylon-platform-alerts
+  namespace: babylon-monitoring
+spec:
+  groups:
+  - name: babylon.platform
+    rules:
+    - alert: BabylonHighProvisionFailureRate
+      expr: |
+        (
+          rate(babylon_catalog_provision_requests_total{status="failed"}[5m]) /
+          rate(babylon_catalog_provision_requests_total[5m])
+        ) > 0.1
+      for: 5m
+      labels:
+        severity: warning
+        component: catalog
+      annotations:
+        summary: "High provision failure rate detected"
+        description: "Provision failure rate is {{ $value | humanizePercentage }}"
+        runbook_url: "https://docs.babylon.example.com/runbooks/provision-failures"
+
+    - alert: BabylonOperatorDown
+      expr: up{job=~"babylon-.*-operator"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        component: operator
+      annotations:
+        summary: "Babylon operator is down"
+        description: "Operator {{ $labels.job }} is not responding"
+
+    - alert: BabylonDatabaseConnectionsHigh
+      expr: babylon_database_connections_active > 80
+      for: 2m
+      labels:
+        severity: warning
+        component: database
+      annotations:
+        summary: "Database connections running high"
+        description: "Active database connections: {{ $value }}"
+```
+
+=== Alert Management
+
+==== Notification Configuration
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alertmanager-config
+  namespace: babylon-monitoring
+type: Opaque
+stringData:
+  alertmanager.yml: |
+    global:
+      smtp_smarthost: 'mail.example.com:587'
+      smtp_from: 'babylon-alerts@example.com'
+      smtp_auth_username: 'babylon-alerts@example.com'
+      smtp_auth_password: 'smtp-password'
+
+    templates:
+    - '/etc/alertmanager/templates/*.tmpl'
+
+    route:
+      group_by: ['alertname', 'severity']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 12h
+      receiver: 'babylon-team'
+
+      routes:
+      - match:
+          severity: critical
+        receiver: 'babylon-oncall'
+
+      - match:
+          component: database
+        receiver: 'babylon-dba-team'
+
+    receivers:
+    - name: 'babylon-team'
+      email_configs:
+      - to: 'babylon-team@example.com'
+        subject: 'Babylon Alert: {{ .GroupLabels.alertname }}'
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          {{ end }}
+
+    - name: 'babylon-oncall'
+      email_configs:
+      - to: 'babylon-oncall@example.com'
+        subject: 'CRITICAL: Babylon Alert'
+      pagerduty_configs:
+      - service_key: 'babylon-service-key'
+
+    - name: 'babylon-dba-team'
+      email_configs:
+      - to: 'dba-team@example.com'
+        subject: 'Database Alert: {{ .GroupLabels.alertname }}'
+```
+
+== Troubleshooting and Support
+
+=== Common Administrative Tasks
+
+==== User Account Issues
+```bash
+# Reset user quota
+oc delete resourcequota user-quota-standard -n user-johndoe-workspace
+oc apply -f user-quota-standard.yaml -n user-johndoe-workspace
+
+# Extend resource claim lifespan
+oc patch resourceclaim workshop-claim-123 -n user-johndoe-workspace \
+  --type=merge -p '{"spec":{"lifespan":{"end":"2023-12-31T23:59:59Z"}}}'
+
+# Force delete stuck resource claim
+oc patch resourceclaim stuck-claim -n user-namespace \
+  --type=merge -p '{"metadata":{"finalizers":[]}}'
+oc delete resourceclaim stuck-claim -n user-namespace --force --grace-period=0
+```
+
+==== Platform Recovery
+```bash
+# Restart all operators
+oc rollout restart deployment -n babylon-agnosticv-operator
+oc rollout restart deployment -n poolboy
+oc rollout restart deployment -n anarchy-operator
+oc rollout restart deployment -n babylon-workshop-manager
+
+# Clear operator caches
+oc delete configmap -n babylon-agnosticv-operator -l caching=enabled
+oc delete pods -n poolboy -l app=poolboy
+
+# Database maintenance
+oc exec -n babylon-catalog deployment/postgresql -- psql -U postgres -c "VACUUM ANALYZE;"
+oc exec -n babylon-catalog deployment/redis -- redis-cli FLUSHDB
+```
+
+==== Emergency Procedures
+```bash
+# Emergency shutdown
+echo "=== EMERGENCY SHUTDOWN ==="
+oc scale deployment --replicas=0 -n babylon-catalog catalog-api
+oc scale deployment --replicas=0 -n babylon-admin admin-api
+oc scale deployment --replicas=0 -n babylon-agnosticv-operator babylon-agnosticv-operator
+oc annotate namespace babylon-catalog babylon.gpte.redhat.com/emergency-shutdown=true
+
+# Emergency recovery
+echo "=== EMERGENCY RECOVERY ==="
+oc scale deployment --replicas=3 -n babylon-catalog catalog-api
+oc scale deployment --replicas=2 -n babylon-admin admin-api
+oc scale deployment --replicas=1 -n babylon-agnosticv-operator babylon-agnosticv-operator
+oc annotate namespace babylon-catalog babylon.gpte.redhat.com/emergency-shutdown-
+```
+
+=== Support Workflows
+
+==== Incident Management Process
+```bash
+# Create incident ticket
+curl -X POST https://admin.babylon.example.com/api/admin/v1/incidents \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "User unable to provision workshop",
+    "description": "User johndoe reports provisioning failures for openshift-workshop",
+    "severity": "medium",
+    "category": "provisioning",
+    "assignedTo": "platform-team",
+    "userData": {
+      "username": "johndoe",
+      "namespace": "user-johndoe-workspace",
+      "catalogItem": "openshift-workshop",
+      "error": "AWS quota exceeded"
+    }
+  }'
+
+# Update incident status
+curl -X PATCH https://admin.babylon.example.com/api/admin/v1/incidents/INC-12345 \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "status": "in_progress",
+    "assignedTo": "aws-team",
+    "comments": [
+      {
+        "text": "Escalated to AWS team for quota increase",
+        "author": "admin@example.com",
+        "timestamp": "2023-01-01T14:30:00Z"
+      }
+    ]
+  }'
+```
+
+This comprehensive administrator guide provides the foundation for effective Babylon Platform administration, covering user management, catalog administration, platform configuration, monitoring, and support procedures.

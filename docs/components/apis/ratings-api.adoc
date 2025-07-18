@@ -1,0 +1,761 @@
+= Ratings API
+
+== Overview
+
+The Ratings API manages user feedback, ratings, and bookmarking functionality for catalog items and workshops. It provides endpoints for submitting ratings, retrieving feedback history, and managing user bookmarks to enhance the user experience and content quality.
+
+== API Base URL
+
+```
+https://ratings.babylon.example.com/api/ratings
+```
+
+== Authentication
+
+All Ratings API endpoints use OAuth authentication consistent with other platform APIs:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  https://ratings.babylon.example.com/api/ratings/catalogitem/uuid/history
+```
+
+== Catalog Item Ratings
+
+=== Submit Rating
+
+==== Create New Rating
+Submit a rating and feedback for a completed catalog item experience.
+
+```http
+POST /api/ratings/request/{requestUid}
+```
+
+**Path Parameters**:
+* `requestUid` (string): Unique identifier for the resource claim/request
+
+**Request Body**:
+```json
+{
+  "rating": 5,
+  "useful": "yes",
+  "comment": "Excellent workshop content and hands-on exercises. The lab environment worked flawlessly.",
+  "categories": {
+    "content_quality": 5,
+    "lab_environment": 5,
+    "documentation": 4,
+    "support": 5
+  },
+  "feedback": {
+    "liked_most": "The practical exercises were very relevant to real-world scenarios",
+    "improvements": "Could use more advanced topics in the second half",
+    "recommend": true,
+    "completion_time": "4.5h",
+    "difficulty_rating": "appropriate"
+  },
+  "metadata": {
+    "user_experience": "intermediate",
+    "use_case": "learning",
+    "completion_status": "completed"
+  }
+}
+```
+
+**Response**:
+```json
+{
+  "apiVersion": "v1",
+  "kind": "Rating",
+  "metadata": {
+    "ratingId": "rating-12345",
+    "requestUid": "req-abc123",
+    "userId": "user-johndoe",
+    "submittedAt": "2023-01-01T17:30:00Z"
+  },
+  "spec": {
+    "catalogItem": {
+      "uuid": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "openshift-fundamentals",
+      "displayName": "OpenShift Fundamentals Workshop"
+    },
+    "rating": 5,
+    "useful": "yes",
+    "comment": "Excellent workshop content and hands-on exercises. The lab environment worked flawlessly.",
+    "categories": {
+      "content_quality": 5,
+      "lab_environment": 5,
+      "documentation": 4,
+      "support": 5
+    }
+  },
+  "status": {
+    "processed": true,
+    "aggregated": true,
+    "moderated": false,
+    "public": true
+  }
+}
+```
+
+=== Get User Rating
+
+==== Retrieve User's Rating
+Get the rating submitted by the current user for a specific request.
+
+```http
+GET /api/ratings/request/{requestUid}
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "v1",
+  "kind": "UserRating",
+  "metadata": {
+    "ratingId": "rating-12345",
+    "requestUid": "req-abc123",
+    "submittedAt": "2023-01-01T17:30:00Z"
+  },
+  "rating": {
+    "overall": 5,
+    "useful": "yes",
+    "comment": "Excellent workshop content and hands-on exercises.",
+    "categories": {
+      "content_quality": 5,
+      "lab_environment": 5,
+      "documentation": 4,
+      "support": 5
+    },
+    "feedback": {
+      "liked_most": "The practical exercises were very relevant",
+      "improvements": "Could use more advanced topics",
+      "recommend": true,
+      "completion_time": "4.5h"
+    }
+  },
+  "editable": true,
+  "editDeadline": "2023-01-08T17:30:00Z"
+}
+```
+
+=== Update Rating
+
+==== Modify Existing Rating
+Update a previously submitted rating (within edit window).
+
+```http
+PUT /api/ratings/request/{requestUid}
+```
+
+**Request Body**:
+```json
+{
+  "rating": 4,
+  "useful": "yes",
+  "comment": "Updated: Good workshop, but encountered some lab issues that were resolved quickly.",
+  "categories": {
+    "content_quality": 5,
+    "lab_environment": 4,
+    "documentation": 4,
+    "support": 5
+  },
+  "feedback": {
+    "improvements": "Lab environment had some connectivity issues initially"
+  }
+}
+```
+
+=== Catalog Item Rating History
+
+==== Get Rating Analytics
+Retrieve comprehensive rating analytics for a catalog item.
+
+```http
+GET /api/ratings/catalogitem/{assetUuid}/history
+```
+
+**Path Parameters**:
+* `assetUuid` (string): Catalog item UUID
+
+**Query Parameters**:
+* `period` (string): Time period (7d, 30d, 90d, 1y, all) - default: 30d
+* `include_comments` (boolean): Include user comments - default: false
+* `include_trends` (boolean): Include trending data - default: true
+
+**Example Request**:
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://ratings.babylon.example.com/api/ratings/catalogitem/550e8400-e29b-41d4-a716-446655440000/history?period=30d&include_comments=true"
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "v1",
+  "kind": "RatingHistory",
+  "metadata": {
+    "catalogItemUuid": "550e8400-e29b-41d4-a716-446655440000",
+    "catalogItemName": "openshift-fundamentals",
+    "period": "30d",
+    "generatedAt": "2023-01-01T12:00:00Z"
+  },
+  "summary": {
+    "totalRatings": 128,
+    "averageRating": 4.3,
+    "recommendationRate": 89.1,
+    "completionRate": 91.4,
+    "satisfactionScore": 4.2,
+    "npsScore": 42
+  },
+  "distribution": {
+    "5_stars": 64,
+    "4_stars": 45,
+    "3_stars": 15,
+    "2_stars": 3,
+    "1_stars": 1
+  },
+  "categories": {
+    "content_quality": {
+      "average": 4.5,
+      "distribution": {"5": 72, "4": 41, "3": 12, "2": 2, "1": 1}
+    },
+    "lab_environment": {
+      "average": 4.1,
+      "distribution": {"5": 56, "4": 48, "3": 18, "2": 5, "1": 1}
+    },
+    "documentation": {
+      "average": 4.2,
+      "distribution": {"5": 58, "4": 52, "3": 15, "2": 2, "1": 1}
+    },
+    "support": {
+      "average": 4.4,
+      "distribution": {"5": 68, "4": 42, "3": 14, "2": 3, "1": 1}
+    }
+  },
+  "trends": {
+    "weekly": [
+      {"week": "2023-W01", "average": 4.2, "count": 15},
+      {"week": "2023-W02", "average": 4.4, "count": 18},
+      {"week": "2023-W03", "average": 4.3, "count": 22},
+      {"week": "2023-W04", "average": 4.5, "count": 20}
+    ],
+    "improvements": {
+      "rating_trend": "+0.2",
+      "volume_trend": "+15%",
+      "satisfaction_trend": "+5%"
+    }
+  },
+  "feedback": {
+    "most_liked": [
+      "Hands-on practical exercises",
+      "Clear documentation",
+      "Responsive support team",
+      "Real-world scenarios"
+    ],
+    "improvement_areas": [
+      "More advanced topics",
+      "Better lab performance",
+      "Longer session time",
+      "Additional examples"
+    ],
+    "common_issues": [
+      "Lab environment startup time",
+      "Network connectivity",
+      "Browser compatibility"
+    ]
+  },
+  "demographics": {
+    "experience_levels": {
+      "beginner": 45,
+      "intermediate": 65,
+      "advanced": 18
+    },
+    "use_cases": {
+      "learning": 89,
+      "evaluation": 23,
+      "training": 16
+    },
+    "completion_times": {
+      "under_3h": 23,
+      "3_to_6h": 78,
+      "over_6h": 27
+    }
+  }
+}
+```
+
+=== Rating Comments
+
+==== Get Public Comments
+Retrieve public comments and reviews for a catalog item.
+
+```http
+GET /api/ratings/catalogitem/{assetUuid}/comments
+```
+
+**Query Parameters**:
+* `limit` (integer): Maximum comments to return (default: 20, max: 100)
+* `offset` (integer): Number of comments to skip
+* `sort` (string): Sort order (newest, oldest, highest_rated, most_helpful)
+* `min_rating` (integer): Minimum rating filter (1-5)
+
+**Example Response**:
+```json
+{
+  "apiVersion": "v1",
+  "kind": "CommentList",
+  "metadata": {
+    "catalogItemUuid": "550e8400-e29b-41d4-a716-446655440000",
+    "total": 45,
+    "showing": 20
+  },
+  "items": [
+    {
+      "commentId": "comment-12345",
+      "rating": 5,
+      "comment": "Outstanding workshop! The hands-on labs were perfectly designed.",
+      "helpful": "yes",
+      "submittedAt": "2023-01-01T15:30:00Z",
+      "author": {
+        "displayName": "DevOps Engineer",
+        "experience": "intermediate",
+        "verified": true
+      },
+      "categories": {
+        "content_quality": 5,
+        "lab_environment": 5,
+        "documentation": 4
+      },
+      "metadata": {
+        "completion_time": "4h",
+        "use_case": "learning"
+      }
+    }
+  ],
+  "pagination": {
+    "limit": 20,
+    "offset": 0,
+    "hasMore": true
+  }
+}
+```
+
+== Bookmarks and Favorites
+
+=== User Bookmarks
+
+==== List User Bookmarks
+Retrieve the current user's bookmarked catalog items.
+
+```http
+GET /api/user-manager/bookmarks
+```
+
+**Query Parameters**:
+* `category` (string): Filter by catalog item category
+* `sort` (string): Sort order (created, name, rating)
+
+**Example Response**:
+```json
+{
+  "apiVersion": "v1",
+  "kind": "BookmarkList",
+  "metadata": {
+    "userId": "user-johndoe",
+    "total": 8,
+    "lastUpdated": "2023-01-01T12:00:00Z"
+  },
+  "items": [
+    {
+      "bookmarkId": "bookmark-12345",
+      "catalogItem": {
+        "uuid": "550e8400-e29b-41d4-a716-446655440000",
+        "name": "openshift-fundamentals",
+        "displayName": "OpenShift Fundamentals Workshop",
+        "category": "workshops",
+        "namespace": "babylon-catalog-workshops"
+      },
+      "bookmarkedAt": "2023-01-01T10:30:00Z",
+      "notes": "Great for team training",
+      "tags": ["openshift", "team-training", "priority"],
+      "status": {
+        "completed": false,
+        "lastAccessed": "2023-01-01T11:45:00Z",
+        "rating": null
+      }
+    }
+  ]
+}
+```
+
+==== Add Bookmark
+Add a catalog item to user's bookmarks.
+
+```http
+POST /api/user-manager/bookmarks
+```
+
+**Request Body**:
+```json
+{
+  "assetUuid": "550e8400-e29b-41d4-a716-446655440000",
+  "notes": "Bookmark for upcoming team workshop",
+  "tags": ["team-training", "q1-2023"],
+  "priority": "high"
+}
+```
+
+**Response**:
+```json
+{
+  "bookmarkId": "bookmark-12346",
+  "status": "created",
+  "catalogItem": {
+    "name": "openshift-fundamentals",
+    "displayName": "OpenShift Fundamentals Workshop"
+  }
+}
+```
+
+==== Remove Bookmark
+Remove a catalog item from user's bookmarks.
+
+```http
+DELETE /api/user-manager/bookmarks
+```
+
+**Query Parameters**:
+* `asset_uuid` (string): Catalog item UUID to remove
+
+**Example Request**:
+```bash
+curl -X DELETE \
+  -H "Authorization: Bearer $TOKEN" \
+  "https://ratings.babylon.example.com/api/user-manager/bookmarks?asset_uuid=550e8400-e29b-41d4-a716-446655440000"
+```
+
+=== Update Bookmark
+
+==== Modify Bookmark Details
+Update bookmark notes, tags, or priority.
+
+```http
+PATCH /api/user-manager/bookmarks/{bookmarkId}
+```
+
+**Request Body**:
+```json
+{
+  "notes": "Updated notes after completing the workshop",
+  "tags": ["completed", "excellent", "recommend"],
+  "priority": "medium",
+  "completed": true,
+  "completedAt": "2023-01-01T17:00:00Z"
+}
+```
+
+== Analytics and Reporting
+
+=== Platform Rating Analytics
+
+==== Get Platform-Wide Statistics
+Retrieve comprehensive rating statistics across the platform.
+
+```http
+GET /api/ratings/analytics/platform
+```
+
+**Query Parameters**:
+* `period` (string): Analysis period (7d, 30d, 90d, 1y)
+* `category` (string): Filter by catalog item category
+* `include_trends` (boolean): Include trending analysis
+
+**Example Response**:
+```json
+{
+  "apiVersion": "v1",
+  "kind": "PlatformRatingAnalytics",
+  "metadata": {
+    "period": "30d",
+    "generatedAt": "2023-01-01T12:00:00Z"
+  },
+  "overview": {
+    "totalRatings": 2456,
+    "averageRating": 4.2,
+    "totalCatalogItems": 89,
+    "ratedCatalogItems": 76,
+    "recommendationRate": 87.3,
+    "npsScore": 38
+  },
+  "categories": {
+    "workshops": {
+      "totalRatings": 1834,
+      "averageRating": 4.3,
+      "recommendationRate": 89.1
+    },
+    "demos": {
+      "totalRatings": 412,
+      "averageRating": 4.1,
+      "recommendationRate": 84.2
+    },
+    "labs": {
+      "totalRatings": 210,
+      "averageRating": 4.0,
+      "recommendationRate": 82.4
+    }
+  },
+  "topRated": [
+    {
+      "catalogItemUuid": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "openshift-fundamentals",
+      "averageRating": 4.8,
+      "totalRatings": 128,
+      "recommendationRate": 95.3
+    }
+  ],
+  "needsImprovement": [
+    {
+      "catalogItemUuid": "660e8400-e29b-41d4-a716-446655440001",
+      "name": "legacy-system-demo",
+      "averageRating": 3.2,
+      "totalRatings": 45,
+      "recommendationRate": 62.2
+    }
+  ],
+  "trends": {
+    "rating_improvement": "+0.1",
+    "volume_growth": "+23%",
+    "engagement_score": 78.5
+  }
+}
+```
+
+=== Content Quality Insights
+
+==== Get Content Recommendations
+Retrieve AI-powered content improvement recommendations.
+
+```http
+GET /api/ratings/analytics/insights/{assetUuid}
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "v1",
+  "kind": "ContentInsights",
+  "metadata": {
+    "catalogItemUuid": "550e8400-e29b-41d4-a716-446655440000",
+    "analysisDate": "2023-01-01T12:00:00Z"
+  },
+  "insights": {
+    "strengths": [
+      "Excellent hands-on exercises praised by 89% of users",
+      "Clear documentation structure with high readability",
+      "Responsive support team with 3-minute average response"
+    ],
+    "improvements": [
+      "15% of users suggest adding more advanced topics",
+      "Lab startup time averaging 3 minutes could be optimized",
+      "Mobile compatibility issues reported by 8% of users"
+    ],
+    "actionable_recommendations": [
+      {
+        "priority": "high",
+        "area": "content",
+        "recommendation": "Add optional advanced modules for experienced users",
+        "impact": "Could increase rating from 4.3 to 4.6",
+        "effort": "medium"
+      },
+      {
+        "priority": "medium",
+        "area": "infrastructure",
+        "recommendation": "Optimize lab environment startup process",
+        "impact": "Reduce negative feedback by 12%",
+        "effort": "high"
+      }
+    ]
+  },
+  "competitiveAnalysis": {
+    "similarContent": [
+      {
+        "name": "advanced-openshift-workshop",
+        "rating": 4.5,
+        "differentiators": ["More advanced topics", "Longer duration"]
+      }
+    ],
+    "marketPosition": "strong",
+    "improvementPotential": "medium"
+  }
+}
+```
+
+== Error Responses
+
+=== Common Error Codes
+
+==== 400 Bad Request
+```json
+{
+  "error": {
+    "code": "INVALID_RATING_VALUE",
+    "message": "Rating must be between 1 and 5",
+    "details": {
+      "field": "rating",
+      "providedValue": 6,
+      "allowedRange": "1-5"
+    }
+  }
+}
+```
+
+==== 404 Not Found
+```json
+{
+  "error": {
+    "code": "RATING_NOT_FOUND",
+    "message": "No rating found for the specified request",
+    "details": {
+      "requestUid": "req-invalid-123"
+    }
+  }
+}
+```
+
+==== 409 Conflict
+```json
+{
+  "error": {
+    "code": "RATING_ALREADY_EXISTS",
+    "message": "User has already submitted a rating for this request",
+    "details": {
+      "requestUid": "req-abc123",
+      "existingRatingId": "rating-12345",
+      "editUrl": "/api/ratings/request/req-abc123"
+    }
+  }
+}
+```
+
+==== 422 Unprocessable Entity
+```json
+{
+  "error": {
+    "code": "RATING_EDIT_DEADLINE_PASSED",
+    "message": "Rating edit deadline has passed",
+    "details": {
+      "deadline": "2023-01-08T17:30:00Z",
+      "currentTime": "2023-01-10T12:00:00Z"
+    }
+  }
+}
+```
+
+== SDK Examples
+
+=== JavaScript/TypeScript
+```typescript
+import { RatingsAPI } from '@babylon/ratings-client';
+
+const api = new RatingsAPI({
+  baseUrl: 'https://ratings.babylon.example.com',
+  token: process.env.BABYLON_TOKEN
+});
+
+// Submit rating
+const rating = await api.submitRating('req-abc123', {
+  rating: 5,
+  useful: 'yes',
+  comment: 'Excellent workshop content',
+  categories: {
+    content_quality: 5,
+    lab_environment: 4,
+    documentation: 5,
+    support: 5
+  }
+});
+
+// Get rating history
+const history = await api.getRatingHistory('550e8400-e29b-41d4-a716-446655440000', {
+  period: '30d',
+  include_comments: true
+});
+
+// Manage bookmarks
+const bookmarks = await api.getUserBookmarks();
+await api.addBookmark('550e8400-e29b-41d4-a716-446655440000', {
+  notes: 'Great for team training'
+});
+```
+
+=== Python
+```python
+from babylon_ratings import RatingsClient
+
+client = RatingsClient(
+    base_url='https://ratings.babylon.example.com',
+    token=os.environ['BABYLON_TOKEN']
+)
+
+# Submit rating
+rating = client.submit_rating(
+    request_uid='req-abc123',
+    rating=5,
+    useful='yes',
+    comment='Excellent workshop content',
+    categories={
+        'content_quality': 5,
+        'lab_environment': 4,
+        'documentation': 5,
+        'support': 5
+    }
+)
+
+# Get analytics
+analytics = client.get_platform_analytics(period='30d')
+print(f"Average rating: {analytics['overview']['averageRating']}")
+
+# Manage bookmarks
+bookmarks = client.get_user_bookmarks()
+client.add_bookmark(
+    asset_uuid='550e8400-e29b-41d4-a716-446655440000',
+    notes='Great for team training'
+)
+```
+
+=== curl Examples
+```bash
+# Submit rating
+curl -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rating": 5,
+    "useful": "yes",
+    "comment": "Excellent workshop content",
+    "categories": {
+      "content_quality": 5,
+      "lab_environment": 4
+    }
+  }' \
+  "https://ratings.babylon.example.com/api/ratings/request/req-abc123"
+
+# Get rating history
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://ratings.babylon.example.com/api/ratings/catalogitem/550e8400-e29b-41d4-a716-446655440000/history?period=30d"
+
+# Add bookmark
+curl -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "assetUuid": "550e8400-e29b-41d4-a716-446655440000",
+    "notes": "Great for team training"
+  }' \
+  "https://ratings.babylon.example.com/api/user-manager/bookmarks"
+
+# Get user bookmarks
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://ratings.babylon.example.com/api/user-manager/bookmarks"
+```
+
+The Ratings API provides comprehensive feedback management, analytics, and bookmarking capabilities that enhance user experience and enable continuous improvement of catalog content through data-driven insights.

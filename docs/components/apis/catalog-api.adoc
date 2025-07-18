@@ -1,0 +1,777 @@
+= Catalog API
+
+== Overview
+
+The Catalog API is the primary user-facing API that provides access to the service catalog, resource provisioning, and lifecycle management capabilities. It serves as the backend for the Catalog UI and enables programmatic access to platform services.
+
+== API Base URL
+
+```
+https://catalog.babylon.example.com/api/catalog/v1
+```
+
+== Core Endpoints
+
+=== Catalog Items
+
+==== List Catalog Items
+Retrieve available catalog items with filtering and pagination support.
+
+```http
+GET /api/catalog/v1/items
+```
+
+**Query Parameters**:
+* `limit` (integer): Maximum number of items to return (default: 50, max: 200)
+* `offset` (integer): Number of items to skip for pagination
+* `category` (string): Filter by category (workshops, demos, labs, etc.)
+* `namespace` (string): Filter by namespace
+* `status` (string): Filter by status (ready, maintenance, deprecated)
+* `search` (string): Search in name and description
+* `sort` (string): Sort field (name, created_at, updated_at)
+* `order` (string): Sort order (asc, desc)
+
+**Example Request**:
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://catalog.babylon.example.com/api/catalog/v1/items?category=workshops&limit=20&sort=name&order=asc"
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "v1",
+  "kind": "CatalogItemList",
+  "metadata": {
+    "timestamp": "2023-01-01T12:00:00Z",
+    "requestId": "req-12345"
+  },
+  "items": [
+    {
+      "uuid": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "openshift-workshop",
+      "displayName": "OpenShift Fundamentals Workshop",
+      "description": "Hands-on workshop covering OpenShift basics",
+      "category": "workshops",
+      "namespace": "babylon-catalog-rhpds",
+      "icon": "data:image/svg+xml;base64,PHN2Zy...",
+      "keywords": ["openshift", "containers", "kubernetes"],
+      "provider": {
+        "name": "Red Hat",
+        "displayName": "Red Hat Training"
+      },
+      "rating": {
+        "average": 4.5,
+        "count": 128
+      },
+      "lifespan": {
+        "default": "8h",
+        "maximum": "24h"
+      },
+      "status": "ready",
+      "createdAt": "2023-01-01T10:00:00Z",
+      "updatedAt": "2023-01-01T11:30:00Z"
+    }
+  ],
+  "pagination": {
+    "limit": 20,
+    "offset": 0,
+    "total": 156,
+    "hasMore": true
+  }
+}
+```
+
+==== Get Catalog Item Details
+Retrieve detailed information about a specific catalog item.
+
+```http
+GET /api/catalog/v1/items/{uuid}
+```
+
+**Path Parameters**:
+* `uuid` (string): Catalog item UUID
+
+**Example Request**:
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://catalog.babylon.example.com/api/catalog/v1/items/550e8400-e29b-41d4-a716-446655440000"
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "v1",
+  "kind": "CatalogItem",
+  "metadata": {
+    "uuid": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "openshift-workshop",
+    "namespace": "babylon-catalog-rhpds",
+    "createdAt": "2023-01-01T10:00:00Z",
+    "updatedAt": "2023-01-01T11:30:00Z"
+  },
+  "spec": {
+    "displayName": "OpenShift Fundamentals Workshop",
+    "description": "Comprehensive hands-on workshop covering OpenShift fundamentals including pods, services, routes, and application deployment.",
+    "longDescription": "This workshop provides a comprehensive introduction to OpenShift...",
+    "category": "workshops",
+    "keywords": ["openshift", "containers", "kubernetes", "devops"],
+    "icon": "data:image/svg+xml;base64,PHN2Zy...",
+    "provider": {
+      "name": "Red Hat",
+      "displayName": "Red Hat Training",
+      "description": "Official Red Hat training content"
+    },
+    "lifespan": {
+      "default": "8h",
+      "maximum": "24h",
+      "relativeMaximum": "7d"
+    },
+    "runtime": {
+      "estimatedTime": "4h",
+      "difficulty": "intermediate",
+      "prerequisites": ["basic-linux", "container-concepts"]
+    },
+    "parameters": [
+      {
+        "name": "user_count",
+        "displayName": "Number of Users",
+        "description": "Number of user environments to provision",
+        "type": "integer",
+        "default": 1,
+        "minimum": 1,
+        "maximum": 100,
+        "required": true
+      },
+      {
+        "name": "openshift_version",
+        "displayName": "OpenShift Version",
+        "description": "OpenShift cluster version",
+        "type": "string",
+        "default": "4.12",
+        "enum": ["4.10", "4.11", "4.12", "4.13"],
+        "required": false
+      },
+      {
+        "name": "aws_region",
+        "displayName": "AWS Region",
+        "description": "AWS region for deployment",
+        "type": "string",
+        "default": "us-east-1",
+        "enum": ["us-east-1", "us-west-2", "eu-west-1"],
+        "required": false
+      }
+    ],
+    "resources": {
+      "cpu": "4 cores per user",
+      "memory": "16GB per user",
+      "storage": "100GB per user",
+      "estimatedCost": "$2.50/hour per user"
+    }
+  },
+  "status": {
+    "phase": "ready",
+    "conditions": [
+      {
+        "type": "Available",
+        "status": "True",
+        "lastTransitionTime": "2023-01-01T10:00:00Z",
+        "reason": "CatalogItemReady",
+        "message": "Catalog item is ready for provisioning"
+      }
+    ],
+    "rating": {
+      "average": 4.5,
+      "count": 128,
+      "distribution": {
+        "5": 64,
+        "4": 45,
+        "3": 15,
+        "2": 3,
+        "1": 1
+      }
+    },
+    "usage": {
+      "totalProvisions": 1250,
+      "activeProvisions": 23,
+      "lastProvisionedAt": "2023-01-01T11:45:00Z"
+    }
+  }
+}
+```
+
+=== Resource Claims
+
+==== Create Resource Claim
+Request provisioning of a catalog item.
+
+```http
+POST /api/catalog/v1/resourceclaims
+```
+
+**Request Body**:
+```json
+{
+  "apiVersion": "v1",
+  "kind": "ResourceClaim",
+  "metadata": {
+    "name": "my-openshift-workshop",
+    "namespace": "user-johndoe-workshop"
+  },
+  "spec": {
+    "catalogItem": {
+      "uuid": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "openshift-workshop",
+      "namespace": "babylon-catalog-rhpds"
+    },
+    "parameters": {
+      "user_count": 25,
+      "openshift_version": "4.12",
+      "aws_region": "us-east-1"
+    },
+    "lifespan": {
+      "end": "2023-01-02T18:00:00Z"
+    },
+    "tags": {
+      "workshop": "openshift-fundamentals",
+      "instructor": "johndoe",
+      "event": "dev-conference-2023"
+    }
+  }
+}
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "v1",
+  "kind": "ResourceClaim",
+  "metadata": {
+    "uuid": "660e8400-e29b-41d4-a716-446655440001",
+    "name": "my-openshift-workshop",
+    "namespace": "user-johndoe-workshop",
+    "createdAt": "2023-01-01T12:00:00Z"
+  },
+  "spec": {
+    "catalogItem": {
+      "uuid": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "openshift-workshop",
+      "namespace": "babylon-catalog-rhpds"
+    },
+    "parameters": {
+      "user_count": 25,
+      "openshift_version": "4.12",
+      "aws_region": "us-east-1"
+    },
+    "lifespan": {
+      "end": "2023-01-02T18:00:00Z"
+    }
+  },
+  "status": {
+    "phase": "Pending",
+    "conditions": [
+      {
+        "type": "Pending",
+        "status": "True",
+        "lastTransitionTime": "2023-01-01T12:00:00Z",
+        "reason": "ProvisionRequested",
+        "message": "Resource claim has been submitted for provisioning"
+      }
+    ],
+    "estimatedReadyTime": "2023-01-01T12:15:00Z"
+  }
+}
+```
+
+==== List Resource Claims
+Retrieve user's resource claims with status information.
+
+```http
+GET /api/catalog/v1/resourceclaims
+```
+
+**Query Parameters**:
+* `limit` (integer): Maximum number of items to return
+* `offset` (integer): Number of items to skip
+* `status` (string): Filter by status (Pending, Provisioning, Ready, Failed, Stopping, Stopped)
+* `catalogItem` (string): Filter by catalog item name
+* `namespace` (string): Filter by namespace
+
+**Example Response**:
+```json
+{
+  "apiVersion": "v1",
+  "kind": "ResourceClaimList",
+  "items": [
+    {
+      "metadata": {
+        "uuid": "660e8400-e29b-41d4-a716-446655440001",
+        "name": "my-openshift-workshop",
+        "namespace": "user-johndoe-workshop"
+      },
+      "spec": {
+        "catalogItem": {
+          "name": "openshift-workshop",
+          "displayName": "OpenShift Fundamentals Workshop"
+        }
+      },
+      "status": {
+        "phase": "Ready",
+        "summary": {
+          "healthy": 25,
+          "unhealthy": 0,
+          "unknown": 0
+        },
+        "resources": [
+          {
+            "name": "openshift-cluster",
+            "kind": "AnarchySubject",
+            "status": "Ready",
+            "url": "https://console-openshift-console.apps.cluster-abc123.abc123.example.opentlc.com"
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+==== Get Resource Claim Details
+Retrieve detailed information about a specific resource claim.
+
+```http
+GET /api/catalog/v1/resourceclaims/{uuid}
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "v1",
+  "kind": "ResourceClaim",
+  "metadata": {
+    "uuid": "660e8400-e29b-41d4-a716-446655440001",
+    "name": "my-openshift-workshop",
+    "namespace": "user-johndoe-workshop",
+    "createdAt": "2023-01-01T12:00:00Z"
+  },
+  "status": {
+    "phase": "Ready",
+    "conditions": [
+      {
+        "type": "Ready",
+        "status": "True",
+        "lastTransitionTime": "2023-01-01T12:12:00Z",
+        "reason": "ProvisionComplete",
+        "message": "All resources have been successfully provisioned"
+      }
+    ],
+    "lifespan": {
+      "end": "2023-01-02T18:00:00Z",
+      "remaining": "30h12m"
+    },
+    "resources": [
+      {
+        "name": "openshift-cluster",
+        "kind": "AnarchySubject",
+        "status": "Ready",
+        "url": "https://console-openshift-console.apps.cluster-abc123.abc123.example.opentlc.com",
+        "credentials": {
+          "console": {
+            "url": "https://console-openshift-console.apps.cluster-abc123.abc123.example.opentlc.com",
+            "username": "admin",
+            "password": "r3dh4t123"
+          },
+          "api": {
+            "url": "https://api.cluster-abc123.abc123.example.opentlc.com:6443",
+            "token": "sha256~abc123..."
+          }
+        },
+        "details": {
+          "nodes": 6,
+          "version": "4.12.5",
+          "region": "us-east-1"
+        }
+      }
+    ],
+    "summary": {
+      "healthy": 25,
+      "unhealthy": 0,
+      "unknown": 0,
+      "provisioned": "2023-01-01T12:12:00Z",
+      "cost": {
+        "current": "$62.50",
+        "estimated": "$1875.00"
+      }
+    }
+  }
+}
+```
+
+==== Update Resource Claim
+Modify resource claim settings such as lifespan.
+
+```http
+PATCH /api/catalog/v1/resourceclaims/{uuid}
+```
+
+**Request Body**:
+```json
+{
+  "spec": {
+    "lifespan": {
+      "end": "2023-01-03T18:00:00Z"
+    }
+  }
+}
+```
+
+==== Delete Resource Claim
+Request deletion/cleanup of a resource claim.
+
+```http
+DELETE /api/catalog/v1/resourceclaims/{uuid}
+```
+
+**Query Parameters**:
+* `force` (boolean): Force immediate deletion without graceful cleanup
+
+=== Service Status
+
+==== Get Service Status
+Retrieve overall service status and health information.
+
+```http
+GET /api/catalog/v1/status
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "v1",
+  "kind": "ServiceStatus",
+  "metadata": {
+    "timestamp": "2023-01-01T12:00:00Z"
+  },
+  "status": {
+    "overall": "healthy",
+    "services": {
+      "database": {
+        "status": "healthy",
+        "lastCheck": "2023-01-01T11:59:30Z"
+      },
+      "redis": {
+        "status": "healthy",
+        "lastCheck": "2023-01-01T11:59:30Z"
+      },
+      "poolboy": {
+        "status": "healthy",
+        "lastCheck": "2023-01-01T11:59:30Z"
+      },
+      "anarchy": {
+        "status": "healthy",
+        "lastCheck": "2023-01-01T11:59:30Z"
+      }
+    },
+    "metrics": {
+      "activeClaims": 156,
+      "pendingClaims": 12,
+      "totalCatalogItems": 89,
+      "healthyCatalogItems": 87,
+      "avgProvisionTime": "8m30s"
+    }
+  }
+}
+```
+
+=== User Information
+
+==== Get Current User
+Retrieve information about the authenticated user.
+
+```http
+GET /api/catalog/v1/user
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "v1",
+  "kind": "User",
+  "metadata": {
+    "username": "johndoe",
+    "email": "john.doe@example.com"
+  },
+  "spec": {
+    "displayName": "John Doe",
+    "roles": ["user", "instructor"],
+    "namespaces": [
+      "user-johndoe-workshop",
+      "user-johndoe-demo"
+    ]
+  },
+  "status": {
+    "quotas": {
+      "maxConcurrentClaims": 10,
+      "currentClaims": 3,
+      "maxLifespan": "7d"
+    },
+    "permissions": [
+      "catalog:read",
+      "resourceclaim:create",
+      "resourceclaim:manage"
+    ]
+  }
+}
+```
+
+== Error Responses
+
+=== Common Error Codes
+
+==== 400 Bad Request
+```json
+{
+  "error": {
+    "code": "INVALID_PARAMETERS",
+    "message": "Invalid or missing required parameters",
+    "details": {
+      "field": "user_count",
+      "reason": "must be between 1 and 100",
+      "provided": 150
+    }
+  }
+}
+```
+
+==== 403 Forbidden
+```json
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "User does not have permission to perform this action",
+    "details": {
+      "requiredPermission": "resourceclaim:create",
+      "userRoles": ["user"]
+    }
+  }
+}
+```
+
+==== 404 Not Found
+```json
+{
+  "error": {
+    "code": "RESOURCE_NOT_FOUND",
+    "message": "The requested resource was not found",
+    "details": {
+      "resourceType": "CatalogItem",
+      "resourceId": "invalid-uuid"
+    }
+  }
+}
+```
+
+==== 409 Conflict
+```json
+{
+  "error": {
+    "code": "RESOURCE_CONFLICT",
+    "message": "Resource claim name already exists in namespace",
+    "details": {
+      "conflictingResource": "my-openshift-workshop",
+      "namespace": "user-johndoe-workshop"
+    }
+  }
+}
+```
+
+==== 422 Unprocessable Entity
+```json
+{
+  "error": {
+    "code": "QUOTA_EXCEEDED",
+    "message": "Request would exceed user quota limits",
+    "details": {
+      "quotaType": "maxConcurrentClaims",
+      "currentUsage": 8,
+      "quotaLimit": 10,
+      "requestedIncrease": 5
+    }
+  }
+}
+```
+
+==== 503 Service Unavailable
+```json
+{
+  "error": {
+    "code": "SERVICE_UNAVAILABLE",
+    "message": "Catalog service is temporarily unavailable",
+    "details": {
+      "reason": "maintenance",
+      "estimatedRecovery": "2023-01-01T13:00:00Z"
+    }
+  }
+}
+```
+
+== Rate Limiting
+
+The Catalog API implements rate limiting to ensure fair usage:
+
+* **Standard Users**: 1000 requests per hour
+* **Instructors**: 2000 requests per hour
+* **Administrators**: 5000 requests per hour
+
+Rate limit information is included in response headers:
+
+```http
+X-RateLimit-Limit: 1000
+X-RateLimit-Remaining: 999
+X-RateLimit-Reset: 1672531200
+X-RateLimit-Window: 3600
+```
+
+== WebSocket API
+
+For real-time updates on resource claim status:
+
+```javascript
+const ws = new WebSocket('wss://catalog.babylon.example.com/api/catalog/v1/ws');
+
+ws.onopen = function(event) {
+  // Subscribe to updates for specific resource claim
+  ws.send(JSON.stringify({
+    action: 'subscribe',
+    resourceType: 'resourceclaim',
+    resourceId: '660e8400-e29b-41d4-a716-446655440001'
+  }));
+};
+
+ws.onmessage = function(event) {
+  const update = JSON.parse(event.data);
+  console.log('Resource claim update:', update);
+};
+```
+
+== SDK Examples
+
+=== JavaScript/TypeScript
+```typescript
+import { CatalogAPI } from '@babylon/catalog-client';
+
+const api = new CatalogAPI({
+  baseUrl: 'https://catalog.babylon.example.com',
+  token: process.env.BABYLON_TOKEN
+});
+
+// List catalog items
+const items = await api.listCatalogItems({
+  category: 'workshops',
+  limit: 20
+});
+
+// Create resource claim
+const claim = await api.createResourceClaim({
+  name: 'my-workshop',
+  namespace: 'user-demo',
+  catalogItem: {
+    uuid: '550e8400-e29b-41d4-a716-446655440000'
+  },
+  parameters: {
+    user_count: 10,
+    aws_region: 'us-east-1'
+  }
+});
+
+// Monitor claim status
+const status = await api.getResourceClaim(claim.metadata.uuid);
+console.log('Claim status:', status.status.phase);
+```
+
+=== Python
+```python
+from babylon_catalog import CatalogClient
+
+client = CatalogClient(
+    base_url='https://catalog.babylon.example.com',
+    token=os.environ['BABYLON_TOKEN']
+)
+
+# List catalog items
+items = client.list_catalog_items(
+    category='workshops',
+    limit=20
+)
+
+# Create resource claim
+claim = client.create_resource_claim(
+    name='my-workshop',
+    namespace='user-demo',
+    catalog_item={
+        'uuid': '550e8400-e29b-41d4-a716-446655440000'
+    },
+    parameters={
+        'user_count': 10,
+        'aws_region': 'us-east-1'
+    }
+)
+
+# Monitor claim status
+status = client.get_resource_claim(claim['metadata']['uuid'])
+print(f"Claim status: {status['status']['phase']}")
+```
+
+=== curl Examples
+
+```bash
+# Set authentication token
+export TOKEN="your-oauth-token-here"
+
+# List catalog items
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://catalog.babylon.example.com/api/catalog/v1/items?category=workshops"
+
+# Get catalog item details
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://catalog.babylon.example.com/api/catalog/v1/items/550e8400-e29b-41d4-a716-446655440000"
+
+# Create resource claim
+curl -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "metadata": {
+      "name": "my-workshop",
+      "namespace": "user-demo"
+    },
+    "spec": {
+      "catalogItem": {
+        "uuid": "550e8400-e29b-41d4-a716-446655440000"
+      },
+      "parameters": {
+        "user_count": 10
+      }
+    }
+  }' \
+  "https://catalog.babylon.example.com/api/catalog/v1/resourceclaims"
+
+# Check resource claim status
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://catalog.babylon.example.com/api/catalog/v1/resourceclaims/660e8400-e29b-41d4-a716-446655440001"
+
+# Extend resource claim lifespan
+curl -X PATCH \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "spec": {
+      "lifespan": {
+        "end": "2023-01-03T18:00:00Z"
+      }
+    }
+  }' \
+  "https://catalog.babylon.example.com/api/catalog/v1/resourceclaims/660e8400-e29b-41d4-a716-446655440001"
+```
+
+The Catalog API provides comprehensive access to platform capabilities through a well-designed RESTful interface with consistent patterns, robust error handling, and excellent developer experience.

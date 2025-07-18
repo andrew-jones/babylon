@@ -1,0 +1,925 @@
+= Anarchy API
+
+== Overview
+
+The Anarchy API is a Kubernetes API extension that provides workflow automation and infrastructure orchestration through Custom Resource Definitions (CRDs). It manages complex provisioning workflows, executes Ansible playbooks, and coordinates infrastructure lifecycle through declarative resource management.
+
+== API Base URL
+
+Anarchy extends the Kubernetes API server with custom resources:
+
+```
+https://api.cluster.example.com/apis/anarchy.gpte.redhat.com/v1
+```
+
+== Authentication
+
+Anarchy API uses standard Kubernetes authentication (service accounts, RBAC, and bearer tokens):
+
+```bash
+# Using kubectl
+kubectl get anarchysubjects -n anarchy-operator
+
+# Using direct API calls
+curl -H "Authorization: Bearer $K8S_TOKEN" \
+  https://api.cluster.example.com/apis/anarchy.gpte.redhat.com/v1/namespaces/anarchy-operator/anarchysubjects
+```
+
+== Anarchy Subjects
+
+=== List Anarchy Subjects
+
+==== Get Anarchy Subjects in Namespace
+Retrieve anarchy subjects for a specific namespace.
+
+```http
+GET /apis/anarchy.gpte.redhat.com/v1/namespaces/{namespace}/anarchysubjects
+```
+
+**Query Parameters**:
+* `labelSelector` (string): Kubernetes label selector for filtering
+* `fieldSelector` (string): Field selector for filtering
+* `limit` (integer): Maximum number of items to return
+* `continue` (string): Continuation token for pagination
+* `watch` (boolean): Watch for changes
+
+**Example Request**:
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://api.cluster.example.com/apis/anarchy.gpte.redhat.com/v1/namespaces/anarchy-operator/anarchysubjects?labelSelector=anarchy.gpte.redhat.com/governor=babylon"
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "anarchy.gpte.redhat.com/v1",
+  "kind": "AnarchySubjectList",
+  "metadata": {
+    "continue": "eyJ2IjoibWV0YS5rOHMuaW8vdjEi...",
+    "resourceVersion": "12345"
+  },
+  "items": [
+    {
+      "apiVersion": "anarchy.gpte.redhat.com/v1",
+      "kind": "AnarchySubject",
+      "metadata": {
+        "name": "babylon-openshift-cluster-abc123",
+        "namespace": "anarchy-operator",
+        "uid": "550e8400-e29b-41d4-a716-446655440000",
+        "creationTimestamp": "2023-01-01T10:00:00Z",
+        "generation": 1,
+        "resourceVersion": "12340",
+        "labels": {
+          "anarchy.gpte.redhat.com/governor": "babylon",
+          "babylon.gpte.redhat.com/catalogItem": "openshift-workshop"
+        },
+        "annotations": {
+          "anarchy.gpte.redhat.com/runner": "default",
+          "babylon.gpte.redhat.com/requestUuid": "550e8400-e29b-41d4-a716-446655440000"
+        }
+      },
+      "spec": {
+        "governor": "babylon",
+        "parameters": {
+          "job_vars": {
+            "guid": "abc123",
+            "env_type": "ocp4-cluster",
+            "cloud_provider": "aws",
+            "aws_region": "us-east-1",
+            "subdomain_base": "example.opentlc.com",
+            "user_count": 1,
+            "software_to_deploy": "openshift4"
+          }
+        },
+        "vars": {
+          "desired_state": "started",
+          "provision_data": {
+            "aws_access_key_id": "{{ aws_access_key_id }}",
+            "aws_secret_access_key": "{{ aws_secret_access_key }}"
+          }
+        }
+      },
+      "status": {
+        "summary": {
+          "healthy": 1,
+          "failed": 0,
+          "inProgress": 0
+        },
+        "conditions": [
+          {
+            "type": "Running",
+            "status": "False",
+            "lastTransitionTime": "2023-01-01T10:15:00Z",
+            "reason": "Successful",
+            "message": "AnarchySubject run completed successfully"
+          },
+          {
+            "type": "Successful",
+            "status": "True",
+            "lastTransitionTime": "2023-01-01T10:15:00Z",
+            "reason": "Successful",
+            "message": "AnarchySubject run completed successfully"
+          }
+        ],
+        "runHistory": [
+          {
+            "name": "babylon-openshift-cluster-abc123-provision",
+            "action": "provision",
+            "result": "successful",
+            "startedAt": "2023-01-01T10:00:00Z",
+            "finishedAt": "2023-01-01T10:15:00Z"
+          }
+        ],
+        "vars": {
+          "current_state": "started",
+          "provision_data": {
+            "aws_region": "us-east-1",
+            "master_instances": [
+              {
+                "name": "master-0",
+                "public_ip": "1.2.3.4",
+                "private_ip": "10.0.1.4"
+              }
+            ],
+            "console_url": "https://console-openshift-console.apps.cluster-abc123.abc123.example.opentlc.com",
+            "api_url": "https://api.cluster-abc123.abc123.example.opentlc.com:6443",
+            "admin_password": "secure-password-123"
+          }
+        }
+      }
+    }
+  ]
+}
+```
+
+==== Get All Anarchy Subjects (Cluster-wide)
+Retrieve anarchy subjects across all namespaces (requires cluster permissions).
+
+```http
+GET /apis/anarchy.gpte.redhat.com/v1/anarchysubjects
+```
+
+=== Get Anarchy Subject
+
+==== Retrieve Specific Anarchy Subject
+Get detailed information about a specific anarchy subject.
+
+```http
+GET /apis/anarchy.gpte.redhat.com/v1/namespaces/{namespace}/anarchysubjects/{name}
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "anarchy.gpte.redhat.com/v1",
+  "kind": "AnarchySubject",
+  "metadata": {
+    "name": "babylon-openshift-cluster-abc123",
+    "namespace": "anarchy-operator",
+    "uid": "550e8400-e29b-41d4-a716-446655440000",
+    "creationTimestamp": "2023-01-01T10:00:00Z"
+  },
+  "spec": {
+    "governor": "babylon",
+    "parameters": {
+      "job_vars": {
+        "guid": "abc123",
+        "env_type": "ocp4-cluster",
+        "cloud_provider": "aws",
+        "aws_region": "us-east-1",
+        "subdomain_base": "example.opentlc.com",
+        "user_count": 1,
+        "software_to_deploy": "openshift4"
+      }
+    },
+    "vars": {
+      "desired_state": "started",
+      "provision_data": {}
+    }
+  },
+  "status": {
+    "summary": {
+      "healthy": 1,
+      "failed": 0,
+      "inProgress": 0
+    },
+    "conditions": [
+      {
+        "type": "Successful",
+        "status": "True",
+        "lastTransitionTime": "2023-01-01T10:15:00Z",
+        "reason": "Successful",
+        "message": "AnarchySubject run completed successfully"
+      }
+    ],
+    "runHistory": [
+      {
+        "name": "babylon-openshift-cluster-abc123-provision",
+        "action": "provision",
+        "result": "successful",
+        "startedAt": "2023-01-01T10:00:00Z",
+        "finishedAt": "2023-01-01T10:15:00Z"
+      }
+    ],
+    "vars": {
+      "current_state": "started",
+      "provision_data": {
+        "aws_region": "us-east-1",
+        "console_url": "https://console-openshift-console.apps.cluster-abc123.abc123.example.opentlc.com",
+        "api_url": "https://api.cluster-abc123.abc123.example.opentlc.com:6443",
+        "admin_username": "admin",
+        "admin_password": "secure-password-123",
+        "user_data": {
+          "users": [
+            {
+              "username": "user1",
+              "password": "user-password-123"
+            }
+          ]
+        }
+      }
+    }
+  }
+}
+```
+
+=== Create Anarchy Subject
+
+==== Submit New Anarchy Subject
+Create a new anarchy subject for workflow execution.
+
+```http
+POST /apis/anarchy.gpte.redhat.com/v1/namespaces/{namespace}/anarchysubjects
+```
+
+**Request Body**:
+```json
+{
+  "apiVersion": "anarchy.gpte.redhat.com/v1",
+  "kind": "AnarchySubject",
+  "metadata": {
+    "name": "my-openshift-cluster",
+    "namespace": "anarchy-operator",
+    "labels": {
+      "anarchy.gpte.redhat.com/governor": "babylon",
+      "babylon.gpte.redhat.com/catalogItem": "openshift-workshop"
+    },
+    "annotations": {
+      "anarchy.gpte.redhat.com/runner": "default"
+    }
+  },
+  "spec": {
+    "governor": "babylon",
+    "parameters": {
+      "job_vars": {
+        "guid": "xyz789",
+        "env_type": "ocp4-cluster",
+        "cloud_provider": "aws",
+        "aws_region": "us-west-2",
+        "subdomain_base": "example.opentlc.com",
+        "user_count": 1,
+        "software_to_deploy": "openshift4"
+      }
+    },
+    "vars": {
+      "desired_state": "started",
+      "provision_data": {}
+    }
+  }
+}
+```
+
+=== Update Anarchy Subject
+
+==== Modify Anarchy Subject
+Update anarchy subject specifications to trigger actions.
+
+```http
+PATCH /apis/anarchy.gpte.redhat.com/v1/namespaces/{namespace}/anarchysubjects/{name}
+```
+
+**Request Body** (JSON Patch format):
+```json
+[
+  {
+    "op": "replace",
+    "path": "/spec/vars/desired_state",
+    "value": "stopped"
+  }
+]
+```
+
+=== Delete Anarchy Subject
+
+==== Remove Anarchy Subject
+Delete an anarchy subject and trigger cleanup workflows.
+
+```http
+DELETE /apis/anarchy.gpte.redhat.com/v1/namespaces/{namespace}/anarchysubjects/{name}
+```
+
+## Anarchy Runs
+
+=== List Anarchy Runs
+
+==== Get Anarchy Runs in Namespace
+Retrieve anarchy runs for workflow execution tracking.
+
+```http
+GET /apis/anarchy.gpte.redhat.com/v1/namespaces/{namespace}/anarchyruns
+```
+
+**Example Request**:
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://api.cluster.example.com/apis/anarchy.gpte.redhat.com/v1/namespaces/anarchy-operator/anarchyruns?labelSelector=anarchy.gpte.redhat.com/subject=babylon-openshift-cluster-abc123"
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "anarchy.gpte.redhat.com/v1",
+  "kind": "AnarchyRunList",
+  "metadata": {
+    "resourceVersion": "12350"
+  },
+  "items": [
+    {
+      "apiVersion": "anarchy.gpte.redhat.com/v1",
+      "kind": "AnarchyRun",
+      "metadata": {
+        "name": "babylon-openshift-cluster-abc123-provision",
+        "namespace": "anarchy-operator",
+        "uid": "660e8400-e29b-41d4-a716-446655440001",
+        "creationTimestamp": "2023-01-01T10:00:00Z",
+        "labels": {
+          "anarchy.gpte.redhat.com/governor": "babylon",
+          "anarchy.gpte.redhat.com/subject": "babylon-openshift-cluster-abc123",
+          "anarchy.gpte.redhat.com/action": "provision"
+        }
+      },
+      "spec": {
+        "action": "provision",
+        "governor": "babylon",
+        "subject": {
+          "name": "babylon-openshift-cluster-abc123",
+          "namespace": "anarchy-operator"
+        },
+        "vars": {
+          "job_vars": {
+            "guid": "abc123",
+            "env_type": "ocp4-cluster",
+            "cloud_provider": "aws",
+            "aws_region": "us-east-1"
+          },
+          "desired_state": "started"
+        }
+      },
+      "status": {
+        "result": "successful",
+        "conditions": [
+          {
+            "type": "Successful",
+            "status": "True",
+            "lastTransitionTime": "2023-01-01T10:15:00Z",
+            "reason": "Successful",
+            "message": "Ansible run completed successfully"
+          }
+        ],
+        "runPostTasks": [
+          {
+            "name": "Update subject vars",
+            "result": "successful",
+            "finishedAt": "2023-01-01T10:15:00Z"
+          }
+        ],
+        "runnerPod": {
+          "name": "anarchy-runner-default-abc123",
+          "namespace": "anarchy-operator"
+        }
+      }
+    }
+  ]
+}
+```
+
+=== Get Anarchy Run
+
+==== Retrieve Specific Anarchy Run
+Get detailed information about a specific anarchy run.
+
+```http
+GET /apis/anarchy.gpte.redhat.com/v1/namespaces/{namespace}/anarchyruns/{name}
+```
+
+== Anarchy Actions
+
+=== List Anarchy Actions
+
+==== Get Anarchy Actions in Namespace
+Retrieve anarchy actions for manual workflow triggers.
+
+```http
+GET /apis/anarchy.gpte.redhat.com/v1/namespaces/{namespace}/anarchyactions
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "anarchy.gpte.redhat.com/v1",
+  "kind": "AnarchyActionList",
+  "metadata": {
+    "resourceVersion": "12360"
+  },
+  "items": [
+    {
+      "apiVersion": "anarchy.gpte.redhat.com/v1",
+      "kind": "AnarchyAction",
+      "metadata": {
+        "name": "babylon-openshift-cluster-abc123-stop",
+        "namespace": "anarchy-operator",
+        "uid": "770e8400-e29b-41d4-a716-446655440002",
+        "creationTimestamp": "2023-01-01T16:00:00Z",
+        "labels": {
+          "anarchy.gpte.redhat.com/governor": "babylon",
+          "anarchy.gpte.redhat.com/subject": "babylon-openshift-cluster-abc123"
+        }
+      },
+      "spec": {
+        "action": "stop",
+        "governor": "babylon",
+        "subject": {
+          "name": "babylon-openshift-cluster-abc123",
+          "namespace": "anarchy-operator"
+        },
+        "vars": {
+          "desired_state": "stopped"
+        }
+      },
+      "status": {
+        "state": "pending",
+        "conditions": [
+          {
+            "type": "Pending",
+            "status": "True",
+            "lastTransitionTime": "2023-01-01T16:00:00Z",
+            "reason": "Queued",
+            "message": "Action queued for execution"
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+=== Create Anarchy Action
+
+==== Trigger Manual Action
+Create an anarchy action to trigger manual workflows.
+
+```http
+POST /apis/anarchy.gpte.redhat.com/v1/namespaces/{namespace}/anarchyactions
+```
+
+**Request Body**:
+```json
+{
+  "apiVersion": "anarchy.gpte.redhat.com/v1",
+  "kind": "AnarchyAction",
+  "metadata": {
+    "generateName": "babylon-openshift-cluster-abc123-restart-",
+    "namespace": "anarchy-operator",
+    "labels": {
+      "anarchy.gpte.redhat.com/governor": "babylon",
+      "anarchy.gpte.redhat.com/subject": "babylon-openshift-cluster-abc123"
+    }
+  },
+  "spec": {
+    "action": "restart",
+    "governor": "babylon",
+    "subject": {
+      "name": "babylon-openshift-cluster-abc123",
+      "namespace": "anarchy-operator"
+    },
+    "vars": {
+      "desired_state": "started"
+    }
+  }
+}
+```
+
+== Anarchy Governors
+
+=== List Anarchy Governors
+
+==== Get All Anarchy Governors
+Retrieve all anarchy governors (workflow definitions).
+
+```http
+GET /apis/anarchy.gpte.redhat.com/v1/namespaces/{namespace}/anarchygovernors
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "anarchy.gpte.redhat.com/v1",
+  "kind": "AnarchyGovernorList",
+  "metadata": {
+    "resourceVersion": "12370"
+  },
+  "items": [
+    {
+      "apiVersion": "anarchy.gpte.redhat.com/v1",
+      "kind": "AnarchyGovernor",
+      "metadata": {
+        "name": "babylon",
+        "namespace": "anarchy-operator",
+        "uid": "880e8400-e29b-41d4-a716-446655440003",
+        "creationTimestamp": "2023-01-01T05:00:00Z"
+      },
+      "spec": {
+        "runner": "default",
+        "vars": {
+          "job_vars": {
+            "agnosticd_repo": "https://github.com/redhat-cop/agnosticd",
+            "agnosticd_repo_ref": "development"
+          }
+        },
+        "actions": {
+          "provision": {
+            "playbooks": [
+              {
+                "name": "babylon-provision.yml",
+                "vars": {
+                  "action": "provision"
+                }
+              }
+            ]
+          },
+          "start": {
+            "playbooks": [
+              {
+                "name": "babylon-lifecycle.yml",
+                "vars": {
+                  "action": "start"
+                }
+              }
+            ]
+          },
+          "stop": {
+            "playbooks": [
+              {
+                "name": "babylon-lifecycle.yml",
+                "vars": {
+                  "action": "stop"
+                }
+              }
+            ]
+          },
+          "destroy": {
+            "playbooks": [
+              {
+                "name": "babylon-destroy.yml",
+                "vars": {
+                  "action": "destroy"
+                }
+              }
+            ]
+          }
+        },
+        "subjectEventHandlers": {
+          "create": {
+            "tasks": [
+              {
+                "name": "Schedule provision",
+                "anarchy_schedule_action": {
+                  "action": "provision"
+                }
+              }
+            ]
+          },
+          "delete": {
+            "tasks": [
+              {
+                "name": "Schedule destroy",
+                "anarchy_schedule_action": {
+                  "action": "destroy"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "status": {
+        "conditions": [
+          {
+            "type": "Successful",
+            "status": "True",
+            "lastTransitionTime": "2023-01-01T05:15:00Z",
+            "reason": "Successful",
+            "message": "AnarchyGovernor is active"
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+=== Get Anarchy Governor
+
+==== Retrieve Specific Anarchy Governor
+Get detailed information about a specific anarchy governor.
+
+```http
+GET /apis/anarchy.gpte.redhat.com/v1/namespaces/{namespace}/anarchygovernors/{name}
+```
+
+== kubectl Integration
+
+=== Basic kubectl Commands
+
+==== Anarchy Subject Operations
+```bash
+# List anarchy subjects
+kubectl get anarchysubjects -n anarchy-operator
+
+# Get specific anarchy subject
+kubectl get anarchysubject babylon-openshift-cluster-abc123 -n anarchy-operator -o yaml
+
+# Create anarchy subject from file
+kubectl apply -f anarchy-subject.yaml
+
+# Delete anarchy subject (triggers destroy workflow)
+kubectl delete anarchysubject babylon-openshift-cluster-abc123 -n anarchy-operator
+
+# Watch anarchy subject changes
+kubectl get anarchysubjects -n anarchy-operator -w
+
+# Describe anarchy subject (includes events)
+kubectl describe anarchysubject babylon-openshift-cluster-abc123 -n anarchy-operator
+```
+
+==== Anarchy Run Operations
+```bash
+# List anarchy runs
+kubectl get anarchyruns -n anarchy-operator
+
+# Filter by subject
+kubectl get anarchyruns -n anarchy-operator -l anarchy.gpte.redhat.com/subject=babylon-openshift-cluster-abc123
+
+# Get run details
+kubectl get anarchyrun babylon-openshift-cluster-abc123-provision -n anarchy-operator -o yaml
+
+# Check run logs via runner pod
+kubectl logs anarchy-runner-default-abc123 -n anarchy-operator
+```
+
+==== Anarchy Action Operations
+```bash
+# List anarchy actions
+kubectl get anarchyactions -n anarchy-operator
+
+# Create manual action
+kubectl apply -f anarchy-action.yaml
+
+# Get action status
+kubectl get anarchyaction babylon-openshift-cluster-abc123-stop -n anarchy-operator -o yaml
+```
+
+==== Anarchy Governor Operations
+```bash
+# List anarchy governors
+kubectl get anarchygovernors -n anarchy-operator
+
+# Get governor definition
+kubectl get anarchygovernor babylon -n anarchy-operator -o yaml
+
+# Check governor status
+kubectl describe anarchygovernor babylon -n anarchy-operator
+```
+
+=== Advanced kubectl Usage
+
+==== JSONPath Queries
+```bash
+# Get subject status
+kubectl get anarchysubject babylon-openshift-cluster-abc123 -n anarchy-operator -o jsonpath='{.status.summary}'
+
+# Get console URL from subject vars
+kubectl get anarchysubject babylon-openshift-cluster-abc123 -n anarchy-operator -o jsonpath='{.status.vars.provision_data.console_url}'
+
+# List all successful runs
+kubectl get anarchyruns -n anarchy-operator -o jsonpath='{.items[?(@.status.result=="successful")].metadata.name}'
+
+# Get run duration
+kubectl get anarchyruns -n anarchy-operator -o jsonpath='{.items[*].status.runPostTasks[0].finishedAt}'
+```
+
+==== Label and Field Selectors
+```bash
+# Filter by governor
+kubectl get anarchysubjects -n anarchy-operator -l anarchy.gpte.redhat.com/governor=babylon
+
+# Filter by catalog item
+kubectl get anarchysubjects -A -l babylon.gpte.redhat.com/catalogItem=openshift-workshop
+
+# Filter successful runs
+kubectl get anarchyruns -n anarchy-operator --field-selector status.result=successful
+
+# Filter pending actions
+kubectl get anarchyactions -n anarchy-operator --field-selector status.state=pending
+```
+
+== Client Library Examples
+
+=== Python with kubernetes-client
+```python
+from kubernetes import client, config
+from kubernetes.client.rest import ApiException
+
+# Load kubeconfig
+config.load_kube_config()
+
+# Create custom objects API client
+api = client.CustomObjectsApi()
+
+# List anarchy subjects
+try:
+    subjects = api.list_namespaced_custom_object(
+        group="anarchy.gpte.redhat.com",
+        version="v1",
+        namespace="anarchy-operator",
+        plural="anarchysubjects"
+    )
+    for subject in subjects['items']:
+        print(f"Subject: {subject['metadata']['name']}")
+        if 'summary' in subject['status']:
+            print(f"  Status: {subject['status']['summary']}")
+except ApiException as e:
+    print(f"Exception: {e}")
+
+# Create anarchy action
+action = {
+    "apiVersion": "anarchy.gpte.redhat.com/v1",
+    "kind": "AnarchyAction",
+    "metadata": {
+        "generateName": "babylon-restart-",
+        "namespace": "anarchy-operator"
+    },
+    "spec": {
+        "action": "restart",
+        "governor": "babylon",
+        "subject": {
+            "name": "babylon-openshift-cluster-abc123",
+            "namespace": "anarchy-operator"
+        }
+    }
+}
+
+try:
+    api.create_namespaced_custom_object(
+        group="anarchy.gpte.redhat.com",
+        version="v1",
+        namespace="anarchy-operator",
+        plural="anarchyactions",
+        body=action
+    )
+    print("Anarchy action created successfully")
+except ApiException as e:
+    print(f"Exception creating action: {e}")
+```
+
+=== JavaScript with @kubernetes/client-node
+```javascript
+const k8s = require('@kubernetes/client-node');
+
+const kc = new k8s.KubeConfig();
+kc.loadFromDefault();
+
+const k8sApi = kc.makeApiClient(k8s.CustomObjectsApi);
+
+// List anarchy subjects
+async function listAnarchySubjects() {
+    try {
+        const response = await k8sApi.listNamespacedCustomObject(
+            'anarchy.gpte.redhat.com',
+            'v1',
+            'anarchy-operator',
+            'anarchysubjects'
+        );
+
+        response.body.items.forEach(subject => {
+            console.log(`Subject: ${subject.metadata.name}`);
+            if (subject.status && subject.status.summary) {
+                console.log(`  Healthy: ${subject.status.summary.healthy}`);
+                console.log(`  Failed: ${subject.status.summary.failed}`);
+            }
+        });
+    } catch (err) {
+        console.error('Error listing anarchy subjects:', err);
+    }
+}
+
+// Watch anarchy runs
+function watchAnarchyRuns() {
+    const watch = new k8s.Watch(kc);
+
+    watch.watch('/apis/anarchy.gpte.redhat.com/v1/namespaces/anarchy-operator/anarchyruns',
+        {},
+        (type, obj) => {
+            console.log(`Run Event: ${type}, Name: ${obj.metadata.name}, Result: ${obj.status?.result || 'in-progress'}`);
+        },
+        (err) => {
+            console.error('Watch error:', err);
+        }
+    );
+}
+
+listAnarchySubjects();
+watchAnarchyRuns();
+```
+
+== Error Responses
+
+=== Kubernetes API Error Format
+Anarchy API follows standard Kubernetes error response format:
+
+```json
+{
+  "kind": "Status",
+  "apiVersion": "v1",
+  "metadata": {},
+  "status": "Failure",
+  "message": "anarchysubjects.anarchy.gpte.redhat.com \"invalid-name\" not found",
+  "reason": "NotFound",
+  "details": {
+    "name": "invalid-name",
+    "group": "anarchy.gpte.redhat.com",
+    "kind": "anarchysubjects"
+  },
+  "code": 404
+}
+```
+
+=== Governor Validation Errors
+```json
+{
+  "kind": "Status",
+  "apiVersion": "v1",
+  "status": "Failure",
+  "message": "AnarchySubject.anarchy.gpte.redhat.com \"my-subject\" is invalid",
+  "reason": "Invalid",
+  "details": {
+    "causes": [
+      {
+        "reason": "FieldValueInvalid",
+        "message": "Invalid value: \"invalid-governor\": governor not found",
+        "field": "spec.governor"
+      }
+    ]
+  },
+  "code": 400
+}
+```
+
+== Integration Patterns
+
+=== Resource Lifecycle Integration
+```yaml
+# Example: Poolboy ResourceProvider integration
+apiVersion: poolboy.gpte.redhat.com/v1
+kind: ResourceProvider
+metadata:
+  name: babylon
+  namespace: poolboy
+spec:
+  override:
+    apiVersion: anarchy.gpte.redhat.com/v1
+    kind: AnarchyGovernor
+    name: babylon
+    namespace: anarchy-operator
+  template:
+    apiVersion: anarchy.gpte.redhat.com/v1
+    kind: AnarchySubject
+    metadata:
+      namespace: anarchy-operator
+    spec:
+      governor: babylon
+      parameters:
+        job_vars: "{{ parameters }}"
+```
+
+=== Status Reporting Integration
+```bash
+# Monitor provisioning progress
+kubectl get anarchysubject babylon-openshift-cluster-abc123 -n anarchy-operator \
+  -o jsonpath='{.status.conditions[?(@.type=="Running")].message}'
+
+# Get provision results
+kubectl get anarchysubject babylon-openshift-cluster-abc123 -n anarchy-operator \
+  -o jsonpath='{.status.vars.provision_data}'
+```
+
+The Anarchy API provides comprehensive workflow automation capabilities through Kubernetes-native patterns, enabling complex infrastructure orchestration, Ansible playbook execution, and seamless integration with other platform components through declarative resource management.

@@ -1,0 +1,566 @@
+= Anarchy Operator
+
+== Overview
+
+The Anarchy Operator is a Kubernetes operator that provides workflow automation and infrastructure orchestration capabilities. It manages complex provisioning workflows, executes Ansible playbooks, and coordinates infrastructure lifecycle through declarative resource management. Anarchy acts as the workflow engine that transforms declarative resource requests into executable automation.
+
+== Architecture
+
+=== Core Components
+
+==== Anarchy Controller
+Main operator process that watches for changes to Anarchy custom resources and orchestrates workflow execution.
+
+==== Anarchy Runner
+Executes Ansible playbooks in isolated pods, providing secure execution environments for infrastructure automation.
+
+==== Governor System
+Defines workflow templates and execution policies for different types of infrastructure resources.
+
+== Custom Resources
+
+=== AnarchyGovernor
+
+Defines workflow templates and execution policies for infrastructure automation.
+
+**Schema**:
+```yaml
+apiVersion: anarchy.gpte.redhat.com/v1
+kind: AnarchyGovernor
+metadata:
+  name: babylon
+  namespace: anarchy-operator
+spec:
+  runner: default
+  vars:
+    job_vars:
+      agnosticd_repo: "https://github.com/redhat-cop/agnosticd"
+      agnosticd_repo_ref: "development"
+  actions:
+    provision:
+      playbooks:
+      - name: babylon-provision.yml
+        vars:
+          action: provision
+    start:
+      playbooks:
+      - name: babylon-lifecycle.yml
+        vars:
+          action: start
+    stop:
+      playbooks:
+      - name: babylon-lifecycle.yml
+        vars:
+          action: stop
+    destroy:
+      playbooks:
+      - name: babylon-destroy.yml
+        vars:
+          action: destroy
+  subjectEventHandlers:
+    create:
+      tasks:
+      - name: Schedule provision
+        anarchy_schedule_action:
+          action: provision
+    delete:
+      tasks:
+      - name: Schedule destroy
+        anarchy_schedule_action:
+          action: destroy
+```
+
+=== AnarchySubject
+
+Represents an instance of infrastructure being managed through a workflow.
+
+**Schema**:
+```yaml
+apiVersion: anarchy.gpte.redhat.com/v1
+kind: AnarchySubject
+metadata:
+  name: babylon-openshift-cluster-abc123
+  namespace: anarchy-operator
+  labels:
+    anarchy.gpte.redhat.com/governor: babylon
+    babylon.gpte.redhat.com/catalogItem: openshift-workshop
+spec:
+  governor: babylon
+  parameters:
+    job_vars:
+      guid: abc123
+      env_type: ocp4-cluster
+      cloud_provider: aws
+      aws_region: us-east-1
+      subdomain_base: example.opentlc.com
+      user_count: 1
+      software_to_deploy: openshift4
+  vars:
+    desired_state: started
+    provision_data: {}
+status:
+  summary:
+    healthy: 1
+    failed: 0
+    inProgress: 0
+  conditions:
+  - type: Successful
+    status: "True"
+    lastTransitionTime: "2023-01-01T10:15:00Z"
+    reason: Successful
+    message: AnarchySubject run completed successfully
+  runHistory:
+  - name: babylon-openshift-cluster-abc123-provision
+    action: provision
+    result: successful
+    startedAt: "2023-01-01T10:00:00Z"
+    finishedAt: "2023-01-01T10:15:00Z"
+  vars:
+    current_state: started
+    provision_data:
+      aws_region: us-east-1
+      console_url: "https://console-openshift-console.apps.cluster-abc123.abc123.example.opentlc.com"
+      api_url: "https://api.cluster-abc123.abc123.example.opentlc.com:6443"
+      admin_password: "secure-password-123"
+```
+
+=== AnarchyRun
+
+Tracks the execution of specific workflow actions.
+
+**Schema**:
+```yaml
+apiVersion: anarchy.gpte.redhat.com/v1
+kind: AnarchyRun
+metadata:
+  name: babylon-openshift-cluster-abc123-provision
+  namespace: anarchy-operator
+  labels:
+    anarchy.gpte.redhat.com/governor: babylon
+    anarchy.gpte.redhat.com/subject: babylon-openshift-cluster-abc123
+    anarchy.gpte.redhat.com/action: provision
+spec:
+  action: provision
+  governor: babylon
+  subject:
+    name: babylon-openshift-cluster-abc123
+    namespace: anarchy-operator
+  vars:
+    job_vars:
+      guid: abc123
+      env_type: ocp4-cluster
+      cloud_provider: aws
+    desired_state: started
+status:
+  result: successful
+  conditions:
+  - type: Successful
+    status: "True"
+    lastTransitionTime: "2023-01-01T10:15:00Z"
+    reason: Successful
+    message: Ansible run completed successfully
+  runPostTasks:
+  - name: Update subject vars
+    result: successful
+    finishedAt: "2023-01-01T10:15:00Z"
+  runnerPod:
+    name: anarchy-runner-default-abc123
+    namespace: anarchy-operator
+```
+
+=== AnarchyAction
+
+Triggers manual workflow actions outside of standard lifecycle events.
+
+**Schema**:
+```yaml
+apiVersion: anarchy.gpte.redhat.com/v1
+kind: AnarchyAction
+metadata:
+  name: babylon-openshift-cluster-abc123-restart
+  namespace: anarchy-operator
+  labels:
+    anarchy.gpte.redhat.com/governor: babylon
+    anarchy.gpte.redhat.com/subject: babylon-openshift-cluster-abc123
+spec:
+  action: restart
+  governor: babylon
+  subject:
+    name: babylon-openshift-cluster-abc123
+    namespace: anarchy-operator
+  vars:
+    desired_state: started
+status:
+  state: pending
+  conditions:
+  - type: Pending
+    status: "True"
+    lastTransitionTime: "2023-01-01T16:00:00Z"
+    reason: Queued
+    message: Action queued for execution
+```
+
+== Configuration
+
+=== Operator Configuration
+
+The Anarchy Operator is configured through environment variables and ConfigMaps:
+
+**Environment Variables**:
+```yaml
+env:
+- name: ANARCHY_NAMESPACE
+  value: anarchy-operator
+- name: ANARCHY_DOMAIN
+  value: anarchy.gpte.redhat.com
+- name: ANARCHY_RUNNER_IMAGE
+  value: quay.io/babylon/anarchy-runner:latest
+- name: ANARCHY_LOG_LEVEL
+  value: INFO
+- name: ANARCHY_METRICS_PORT
+  value: "8080"
+```
+
+**Helm Configuration**:
+```yaml
+anarchy:
+  image:
+    repository: quay.io/babylon/anarchy-operator
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+  runners:
+    default:
+      image: quay.io/babylon/anarchy-runner:latest
+      resources:
+        limits:
+          cpu: 2000m
+          memory: 2Gi
+        requests:
+          cpu: 500m
+          memory: 512Mi
+
+  governor:
+    babylon:
+      enabled: true
+      vars:
+        agnosticd_repo: "https://github.com/redhat-cop/agnosticd"
+        agnosticd_repo_ref: "development"
+```
+
+=== Runner Configuration
+
+Anarchy Runners execute Ansible playbooks in isolated environments:
+
+**Runner Pod Template**:
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: anarchy-runner-default-{guid}
+  namespace: anarchy-operator
+spec:
+  containers:
+  - name: runner
+    image: quay.io/babylon/anarchy-runner:latest
+    env:
+    - name: ANARCHY_ACTION
+      value: provision
+    - name: ANARCHY_GOVERNOR
+      value: babylon
+    - name: ANARCHY_SUBJECT_NAME
+      value: babylon-openshift-cluster-abc123
+    volumeMounts:
+    - name: runner-tmp
+      mountPath: /tmp/runner
+    - name: ansible-cfg
+      mountPath: /etc/ansible
+    - name: ssh-keys
+      mountPath: /tmp/ssh-keys
+      readOnly: true
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 2Gi
+      requests:
+        cpu: 500m
+        memory: 512Mi
+  volumes:
+  - name: runner-tmp
+    emptyDir: {}
+  - name: ansible-cfg
+    configMap:
+      name: anarchy-ansible-cfg
+  - name: ssh-keys
+    secret:
+      secretName: anarchy-ssh-keys
+  restartPolicy: Never
+```
+
+== Operations
+
+=== Monitoring AnarchySubjects
+
+**Check Subject Status**:
+```bash
+# List all anarchy subjects
+kubectl get anarchysubjects -n anarchy-operator
+
+# Get specific subject details
+kubectl get anarchysubject babylon-openshift-cluster-abc123 -n anarchy-operator -o yaml
+
+# Check subject conditions
+kubectl get anarchysubject babylon-openshift-cluster-abc123 -n anarchy-operator \
+  -o jsonpath='{.status.conditions[*].type}'
+
+# Monitor subject changes
+kubectl get anarchysubjects -n anarchy-operator -w
+```
+
+**Check Provision Status**:
+```bash
+# Get provision data
+kubectl get anarchysubject babylon-openshift-cluster-abc123 -n anarchy-operator \
+  -o jsonpath='{.status.vars.provision_data}'
+
+# Check console URL
+kubectl get anarchysubject babylon-openshift-cluster-abc123 -n anarchy-operator \
+  -o jsonpath='{.status.vars.provision_data.console_url}'
+```
+
+=== Monitoring AnarchyRuns
+
+**Check Run Status**:
+```bash
+# List runs for a subject
+kubectl get anarchyruns -n anarchy-operator \
+  -l anarchy.gpte.redhat.com/subject=babylon-openshift-cluster-abc123
+
+# Get run details
+kubectl get anarchyrun babylon-openshift-cluster-abc123-provision -n anarchy-operator -o yaml
+
+# Check run logs via runner pod
+kubectl logs anarchy-runner-default-abc123 -n anarchy-operator
+```
+
+**Monitor Run Progress**:
+```bash
+# Watch run status changes
+kubectl get anarchyruns -n anarchy-operator -w
+
+# Check run duration
+kubectl get anarchyrun babylon-openshift-cluster-abc123-provision -n anarchy-operator \
+  -o jsonpath='{.status.runPostTasks[0].finishedAt}'
+```
+
+=== Triggering Manual Actions
+
+**Create Manual Action**:
+```bash
+# Stop a running environment
+cat <<EOF | kubectl apply -f -
+apiVersion: anarchy.gpte.redhat.com/v1
+kind: AnarchyAction
+metadata:
+  generateName: babylon-openshift-cluster-abc123-stop-
+  namespace: anarchy-operator
+spec:
+  action: stop
+  governor: babylon
+  subject:
+    name: babylon-openshift-cluster-abc123
+    namespace: anarchy-operator
+  vars:
+    desired_state: stopped
+EOF
+
+# Restart an environment
+cat <<EOF | kubectl apply -f -
+apiVersion: anarchy.gpte.redhat.com/v1
+kind: AnarchyAction
+metadata:
+  generateName: babylon-openshift-cluster-abc123-start-
+  namespace: anarchy-operator
+spec:
+  action: start
+  governor: babylon
+  subject:
+    name: babylon-openshift-cluster-abc123
+    namespace: anarchy-operator
+  vars:
+    desired_state: started
+EOF
+```
+
+**Monitor Action Execution**:
+```bash
+# List pending actions
+kubectl get anarchyactions -n anarchy-operator --field-selector status.state=pending
+
+# Check action status
+kubectl get anarchyaction babylon-openshift-cluster-abc123-stop-xyz -n anarchy-operator -o yaml
+```
+
+=== Troubleshooting
+
+**Check Operator Health**:
+```bash
+# Check operator deployment
+kubectl get deployment anarchy-operator -n anarchy-operator
+
+# Check operator logs
+kubectl logs deployment/anarchy-operator -n anarchy-operator
+
+# Check operator metrics
+kubectl port-forward deployment/anarchy-operator -n anarchy-operator 8080:8080
+curl http://localhost:8080/metrics
+```
+
+**Debug Failed Runs**:
+```bash
+# Check failed run details
+kubectl get anarchyrun failed-run-name -n anarchy-operator -o yaml
+
+# Check runner pod logs
+kubectl logs anarchy-runner-default-failed-guid -n anarchy-operator
+
+# Check runner pod events
+kubectl describe pod anarchy-runner-default-failed-guid -n anarchy-operator
+```
+
+**Check Governor Configuration**:
+```bash
+# Verify governor exists
+kubectl get anarchygovernor babylon -n anarchy-operator
+
+# Check governor definition
+kubectl get anarchygovernor babylon -n anarchy-operator -o yaml
+
+# Validate governor actions
+kubectl describe anarchygovernor babylon -n anarchy-operator
+```
+
+== Integration Patterns
+
+=== With Poolboy
+
+Anarchy integrates with Poolboy for resource lifecycle management:
+
+```yaml
+apiVersion: poolboy.gpte.redhat.com/v1
+kind: ResourceProvider
+metadata:
+  name: babylon
+  namespace: poolboy
+spec:
+  override:
+    apiVersion: anarchy.gpte.redhat.com/v1
+    kind: AnarchyGovernor
+    name: babylon
+    namespace: anarchy-operator
+  template:
+    apiVersion: anarchy.gpte.redhat.com/v1
+    kind: AnarchySubject
+    metadata:
+      namespace: anarchy-operator
+    spec:
+      governor: babylon
+      parameters:
+        job_vars: "{{ parameters }}"
+```
+
+=== With Workshop Manager
+
+Workshop Manager creates AnarchySubjects for workshop environments:
+
+```yaml
+# Workshop Manager creates this AnarchySubject
+apiVersion: anarchy.gpte.redhat.com/v1
+kind: AnarchySubject
+metadata:
+  name: workshop-environment-001
+  namespace: anarchy-operator
+  labels:
+    babylon.gpte.redhat.com/workshop: openshift-fundamentals
+    babylon.gpte.redhat.com/user: student001
+spec:
+  governor: babylon
+  parameters:
+    job_vars:
+      guid: workshop-001
+      user_count: 1
+      env_type: ocp4-workshop
+```
+
+=== Status Reporting
+
+External systems can monitor AnarchySubject status:
+
+```bash
+# Check if environment is ready
+kubectl get anarchysubject babylon-openshift-cluster-abc123 -n anarchy-operator \
+  -o jsonpath='{.status.conditions[?(@.type=="Successful")].status}'
+
+# Get access information
+kubectl get anarchysubject babylon-openshift-cluster-abc123 -n anarchy-operator \
+  -o jsonpath='{.status.vars.provision_data.console_url}'
+```
+
+== Performance Tuning
+
+=== Runner Optimization
+
+**Resource Allocation**:
+```yaml
+runners:
+  default:
+    resources:
+      limits:
+        cpu: 4000m
+        memory: 4Gi
+      requests:
+        cpu: 1000m
+        memory: 1Gi
+
+    # Multiple runners for parallel execution
+    replicas: 3
+```
+
+**Concurrent Execution**:
+```yaml
+anarchy:
+  concurrency:
+    maxRunners: 10
+    maxRunsPerGovernor: 3
+    maxActionsQueued: 100
+```
+
+=== Governor Optimization
+
+**Efficient Playbook Design**:
+- Use Ansible facts caching
+- Minimize external API calls
+- Implement idempotent operations
+- Use async operations for long-running tasks
+
+**Timeout Configuration**:
+```yaml
+spec:
+  actions:
+    provision:
+      playbooks:
+      - name: babylon-provision.yml
+        timeout: 3600  # 1 hour timeout
+        vars:
+          action: provision
+```
+
+The Anarchy Operator provides a robust foundation for workflow automation and infrastructure orchestration, enabling complex provisioning scenarios through declarative resource management and Ansible-based automation.

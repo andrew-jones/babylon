@@ -1,0 +1,860 @@
+= Notifier Operator
+
+== Overview
+
+The Notifier Operator is a Kubernetes operator that provides event-driven notification capabilities for the Babylon platform. It monitors platform events, processes notification templates, and delivers notifications through multiple channels including email, Slack, webhooks, and custom integrations. The operator enables stakeholders to stay informed about platform activities, resource lifecycle events, and system status changes.
+
+== Architecture
+
+=== Core Components
+
+==== Notifier Controller
+Main operator process that watches for platform events and manages notification workflows.
+
+==== Event Processor
+Processes Kubernetes events and custom platform events to determine notification triggers.
+
+==== Template Engine
+Renders notification content using Jinja2 templates with event data and platform context.
+
+==== Delivery Manager
+Manages notification delivery through various channels with retry logic and delivery confirmation.
+
+==== Channel Integrations
+Provides integrations with email (SMTP), Slack, Microsoft Teams, webhooks, and custom notification services.
+
+== Custom Resources
+
+=== NotificationChannel
+
+Defines notification delivery channels and their configurations.
+
+**Schema**:
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: NotificationChannel
+metadata:
+  name: workshop-team-slack
+  namespace: babylon-notifier
+spec:
+  # Channel type and configuration
+  type: slack
+  displayName: "Workshop Team Slack"
+  description: "Slack notifications for workshop events"
+
+  # Channel-specific configuration
+  config:
+    webhook: "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
+    channel: "#workshop-notifications"
+    username: "Babylon Bot"
+    iconEmoji: ":robot_face:"
+
+  # Delivery settings
+  delivery:
+    enabled: true
+    retryPolicy:
+      maxRetries: 3
+      backoffMultiplier: 2
+      initialDelay: "30s"
+    rateLimit:
+      messagesPerMinute: 10
+      burstSize: 5
+
+  # Formatting options
+  formatting:
+    markdown: true
+    truncateMessages: true
+    maxMessageLength: 4000
+
+status:
+  # Channel health
+  phase: Ready
+
+  # Delivery statistics
+  statistics:
+    totalSent: 1245
+    successful: 1238
+    failed: 7
+    lastSent: "2023-01-01T15:30:00Z"
+
+  # Recent delivery status
+  recentDeliveries:
+  - messageId: "msg-123456"
+    timestamp: "2023-01-01T15:30:00Z"
+    status: "delivered"
+    recipient: "#workshop-notifications"
+  - messageId: "msg-123457"
+    timestamp: "2023-01-01T15:25:00Z"
+    status: "failed"
+    error: "rate_limited"
+
+  conditions:
+  - type: Ready
+    status: "True"
+    lastTransitionTime: "2023-01-01T10:00:00Z"
+    reason: ChannelConnected
+    message: Notification channel is ready and connected
+```
+
+=== NotificationRule
+
+Defines rules for when and how notifications should be sent.
+
+**Schema**:
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: NotificationRule
+metadata:
+  name: workshop-lifecycle-notifications
+  namespace: babylon-notifier
+spec:
+  # Rule metadata
+  displayName: "Workshop Lifecycle Notifications"
+  description: "Notifications for workshop provisioning and completion events"
+  enabled: true
+
+  # Event filters
+  eventFilters:
+  - eventTypes: ["Normal", "Warning"]
+    sources:
+    - component: "workshop-manager"
+    - component: "anarchy-operator"
+    reasons: ["WorkshopStarted", "WorkshopCompleted", "ProvisionFailed"]
+    namespaces: ["user-instructor-*"]
+
+  # Object filters
+  objectFilters:
+  - apiVersion: "babylon.gpte.redhat.com/v1"
+    kind: "Workshop"
+    labelSelectors:
+    - key: "babylon.gpte.redhat.com/catalogItem"
+      operator: "In"
+      values: ["openshift-fundamentals", "kubernetes-advanced"]
+
+  # Notification configuration
+  notifications:
+  - name: "workshop-started"
+    channels: ["workshop-team-slack", "instructor-email"]
+    template: "workshop-started.mjml"
+    conditions:
+      eventReason: "WorkshopStarted"
+    throttling:
+      enabled: true
+      window: "5m"
+      maxNotifications: 1
+
+  - name: "provision-failed"
+    channels: ["platform-team-slack", "ops-email"]
+    template: "provision-failed.mjml"
+    conditions:
+      eventReason: "ProvisionFailed"
+    priority: "high"
+    escalation:
+      enabled: true
+      delay: "15m"
+      channels: ["oncall-pager"]
+
+  # Routing rules
+  routing:
+    defaultChannels: ["platform-team-slack"]
+    routingKey: "babylon.gpte.redhat.com/instructor"
+    routingTable:
+      "alice": ["alice-email", "workshop-team-slack"]
+      "bob": ["bob-email", "workshop-team-slack"]
+      "*": ["workshop-team-slack"]
+
+status:
+  # Rule status
+  phase: Active
+
+  # Trigger statistics
+  statistics:
+    totalTriggers: 156
+    notificationsSent: 148
+    throttled: 8
+    lastTriggered: "2023-01-01T15:30:00Z"
+
+  # Recent triggers
+  recentTriggers:
+  - eventId: "evt-123456"
+    timestamp: "2023-01-01T15:30:00Z"
+    reason: "WorkshopStarted"
+    object: "openshift-fundamentals-dec2023"
+    notifications: ["workshop-started"]
+    status: "sent"
+
+  conditions:
+  - type: Active
+    status: "True"
+    lastTransitionTime: "2023-01-01T10:00:00Z"
+    reason: RuleEnabled
+    message: Notification rule is active and processing events
+```
+
+=== NotificationTemplate
+
+Defines notification content templates using Jinja2 templating.
+
+**Schema**:
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: NotificationTemplate
+metadata:
+  name: workshop-started
+  namespace: babylon-notifier
+spec:
+  # Template metadata
+  displayName: "Workshop Started Notification"
+  description: "Notification sent when a workshop begins"
+  version: "1.2.0"
+
+  # Template format
+  format: "mjml"  # mjml, html, text, markdown
+
+  # Template content
+  subject: |
+    🎓 Workshop "{{ workshop.spec.displayName }}" has started
+
+  body: |
+    <mjml>
+      <mj-body>
+        <mj-section>
+          <mj-column>
+            <mj-text font-size="20px" color="#333">
+              <h2>Workshop Started</h2>
+            </mj-text>
+            <mj-text>
+              The workshop <strong>{{ workshop.spec.displayName }}</strong> has successfully started.
+            </mj-text>
+            <mj-table>
+              <tr style="border-bottom:1px solid #ecedee;text-align:left;padding:15px 0;">
+                <th style="padding: 0 15px 0 0;">Workshop:</th>
+                <td style="padding: 0">{{ workshop.spec.displayName }}</td>
+              </tr>
+              <tr style="border-bottom:1px solid #ecedee;text-align:left;padding:15px 0;">
+                <th style="padding: 0 15px 0 0;">Instructor:</th>
+                <td style="padding: 0">{{ workshop.metadata.labels['babylon.gpte.redhat.com/instructor'] }}</td>
+              </tr>
+              <tr style="border-bottom:1px solid #ecedee;text-align:left;padding:15px 0;">
+                <th style="padding: 0 15px 0 0;">Start Time:</th>
+                <td style="padding: 0">{{ workshop.spec.lifespan.start | strftime('%Y-%m-%d %H:%M UTC') }}</td>
+              </tr>
+              <tr style="border-bottom:1px solid #ecedee;text-align:left;padding:15px 0;">
+                <th style="padding: 0 15px 0 0;">Participants:</th>
+                <td style="padding: 0">{{ workshop.status.summary.registered }} registered</td>
+              </tr>
+            </mj-table>
+            {% if workshop.status.summary.assigned > 0 %}
+            <mj-text color="#28a745">
+              ✅ {{ workshop.status.summary.assigned }} environments ready
+            </mj-text>
+            {% endif %}
+            <mj-button href="{{ platform.ui.url }}/workshops/{{ workshop.metadata.name }}" background-color="#007bff">
+              View Workshop Dashboard
+            </mj-button>
+          </mj-column>
+        </mj-section>
+      </mj-body>
+    </mjml>
+
+  # Slack-specific formatting
+  slackFormat: |
+    {
+      "text": "🎓 Workshop Started: {{ workshop.spec.displayName }}",
+      "blocks": [
+        {
+          "type": "header",
+          "text": {
+            "type": "plain_text",
+            "text": "🎓 Workshop Started"
+          }
+        },
+        {
+          "type": "section",
+          "fields": [
+            {
+              "type": "mrkdwn",
+              "text": "*Workshop:*\n{{ workshop.spec.displayName }}"
+            },
+            {
+              "type": "mrkdwn",
+              "text": "*Instructor:*\n{{ workshop.metadata.labels['babylon.gpte.redhat.com/instructor'] }}"
+            },
+            {
+              "type": "mrkdwn",
+              "text": "*Participants:*\n{{ workshop.status.summary.registered }} registered"
+            },
+            {
+              "type": "mrkdwn",
+              "text": "*Status:*\n{{ workshop.status.summary.assigned }} environments ready"
+            }
+          ]
+        },
+        {
+          "type": "actions",
+          "elements": [
+            {
+              "type": "button",
+              "text": {
+                "type": "plain_text",
+                "text": "View Dashboard"
+              },
+              "url": "{{ platform.ui.url }}/workshops/{{ workshop.metadata.name }}"
+            }
+          ]
+        }
+      ]
+    }
+
+  # Template variables and context
+  context:
+    platform:
+      name: "Babylon Platform"
+      ui:
+        url: "https://babylon.example.com"
+    timezone: "UTC"
+
+status:
+  # Template status
+  phase: Ready
+
+  # Compilation status
+  compilation:
+    status: "Success"
+    lastCompiled: "2023-01-01T10:00:00Z"
+    syntaxValid: true
+
+  # Usage statistics
+  usage:
+    totalRendered: 89
+    lastUsed: "2023-01-01T15:30:00Z"
+    avgRenderTime: "45ms"
+
+  conditions:
+  - type: Ready
+    status: "True"
+    lastTransitionTime: "2023-01-01T10:00:00Z"
+    reason: TemplateCompiled
+    message: Template compiled successfully and ready for use
+```
+
+== Configuration
+
+=== Operator Configuration
+
+The Notifier Operator is configured through environment variables and ConfigMaps:
+
+**Environment Variables**:
+```yaml
+env:
+- name: NOTIFIER_NAMESPACE
+  value: babylon-notifier
+- name: NOTIFIER_LOG_LEVEL
+  value: INFO
+- name: NOTIFIER_METRICS_PORT
+  value: "8080"
+- name: NOTIFIER_WEBHOOK_PORT
+  value: "9443"
+- name: TEMPLATE_CACHE_SIZE
+  value: "100"
+- name: EVENT_BUFFER_SIZE
+  value: "1000"
+- name: REDIS_URL
+  value: "redis://redis:6379/0"
+```
+
+**Helm Configuration**:
+```yaml
+notifier:
+  image:
+    repository: quay.io/babylon/notifier
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+  # Event processing
+  eventProcessing:
+    workers: 5
+    bufferSize: 1000
+    batchSize: 10
+    processingInterval: "5s"
+
+  # Template rendering
+  templates:
+    cacheSize: 100
+    cacheTTL: "1h"
+    renderTimeout: "30s"
+
+  # Delivery settings
+  delivery:
+    workers: 10
+    retryDelay: "30s"
+    maxRetries: 3
+    deliveryTimeout: "2m"
+
+  # Redis configuration for state storage
+  redis:
+    enabled: true
+    host: "redis"
+    port: 6379
+    database: 0
+    password: ""
+
+  # Default notification channels
+  defaultChannels:
+    platform:
+      type: "slack"
+      webhook: "https://hooks.slack.com/services/..."
+      channel: "#platform-notifications"
+    email:
+      type: "smtp"
+      host: "smtp.example.com"
+      port: 587
+      username: "babylon-notifications"
+
+  # Integration settings
+  integrations:
+    kubernetes:
+      watchAllNamespaces: true
+      eventTypes: ["Normal", "Warning"]
+    prometheus:
+      enabled: true
+      pushGateway: "http://prometheus-pushgateway:9091"
+```
+
+=== Channel Configurations
+
+**SMTP Email Channel**:
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: NotificationChannel
+metadata:
+  name: platform-email
+  namespace: babylon-notifier
+spec:
+  type: smtp
+  config:
+    host: "smtp.example.com"
+    port: 587
+    username: "babylon-notifications"
+    passwordSecret: "smtp-credentials"
+    from: "babylon@example.com"
+    fromName: "Babylon Platform"
+    tls: true
+  delivery:
+    retryPolicy:
+      maxRetries: 3
+      backoffMultiplier: 2
+    rateLimit:
+      messagesPerMinute: 30
+```
+
+**Microsoft Teams Channel**:
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: NotificationChannel
+metadata:
+  name: teams-alerts
+  namespace: babylon-notifier
+spec:
+  type: teams
+  config:
+    webhook: "https://outlook.office.com/webhook/..."
+    cardFormat: "adaptive"
+  formatting:
+    useAdaptiveCards: true
+    themeColor: "#0078d4"
+```
+
+**Webhook Channel**:
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: NotificationChannel
+metadata:
+  name: external-webhook
+  namespace: babylon-notifier
+spec:
+  type: webhook
+  config:
+    url: "https://api.external-system.com/notifications"
+    method: "POST"
+    headers:
+      "Content-Type": "application/json"
+      "Authorization": "Bearer ${WEBHOOK_TOKEN}"
+    secretRefs:
+      WEBHOOK_TOKEN: "webhook-credentials"
+  delivery:
+    retryPolicy:
+      maxRetries: 5
+    rateLimit:
+      requestsPerSecond: 10
+```
+
+== Operations
+
+=== Managing Notification Channels
+
+**Create and Configure Channels**:
+```bash
+# Apply channel configuration
+kubectl apply -f notification-channel.yaml
+
+# Check channel status
+kubectl get notificationchannel workshop-team-slack -n babylon-notifier -o yaml
+
+# Test channel connectivity
+kubectl annotate notificationchannel workshop-team-slack -n babylon-notifier \
+  babylon.gpte.redhat.com/test-notification=true
+```
+
+**Monitor Channel Health**:
+```bash
+# List all channels
+kubectl get notificationchannels -n babylon-notifier
+
+# Check delivery statistics
+kubectl get notificationchannel workshop-team-slack -n babylon-notifier \
+  -o jsonpath='{.status.statistics}'
+
+# Check recent delivery failures
+kubectl get events -n babylon-notifier --field-selector type=Warning
+```
+
+**Update Channel Configuration**:
+```bash
+# Update rate limiting
+kubectl patch notificationchannel workshop-team-slack -n babylon-notifier --type='merge' \
+  -p='{"spec":{"delivery":{"rateLimit":{"messagesPerMinute":20}}}}'
+
+# Disable channel temporarily
+kubectl patch notificationchannel workshop-team-slack -n babylon-notifier --type='merge' \
+  -p='{"spec":{"delivery":{"enabled":false}}}'
+```
+
+=== Managing Notification Rules
+
+**Create Notification Rules**:
+```bash
+# Apply notification rule
+kubectl apply -f notification-rule.yaml
+
+# Check rule status
+kubectl get notificationrule workshop-lifecycle-notifications -n babylon-notifier -o yaml
+
+# Monitor rule triggers
+kubectl get notificationrule workshop-lifecycle-notifications -n babylon-notifier -w
+```
+
+**Update Rule Conditions**:
+```bash
+# Add new event type
+kubectl patch notificationrule workshop-lifecycle-notifications -n babylon-notifier --type='merge' \
+  -p='{"spec":{"eventFilters":[{"eventTypes":["Normal","Warning","Error"],"reasons":["WorkshopStarted","WorkshopCompleted","ProvisionFailed","WorkshopExpired"]}]}}'
+
+# Update throttling settings
+kubectl patch notificationrule workshop-lifecycle-notifications -n babylon-notifier --type='merge' \
+  -p='{"spec":{"notifications":[{"name":"workshop-started","throttling":{"window":"10m","maxNotifications":2}}]}}'
+```
+
+**Test Notification Rules**:
+```bash
+# Trigger test notification
+cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: Event
+metadata:
+  name: test-workshop-started
+  namespace: user-instructor-jane-20231215
+type: Normal
+reason: WorkshopStarted
+involvedObject:
+  apiVersion: babylon.gpte.redhat.com/v1
+  kind: Workshop
+  name: openshift-fundamentals-dec2023
+message: "Workshop started successfully"
+EOF
+```
+
+=== Managing Templates
+
+**Create and Update Templates**:
+```bash
+# Apply template
+kubectl apply -f notification-template.yaml
+
+# Check template compilation
+kubectl get notificationtemplate workshop-started -n babylon-notifier \
+  -o jsonpath='{.status.compilation.status}'
+
+# Test template rendering
+kubectl annotate notificationtemplate workshop-started -n babylon-notifier \
+  babylon.gpte.redhat.com/test-render=true
+```
+
+**Template Development**:
+```bash
+# Create template from file
+kubectl create configmap template-source -n babylon-notifier \
+  --from-file=workshop-started.mjml=templates/workshop-started.mjml
+
+# Update template from configmap
+kubectl patch notificationtemplate workshop-started -n babylon-notifier --type='merge' \
+  -p='{"spec":{"body":"{{ configmap_content }}"}}'
+
+# Validate template syntax
+kubectl exec deployment/notifier -n babylon-notifier -- \
+  notifier-cli validate-template --template-file /path/to/template.mjml
+```
+
+=== Monitoring and Troubleshooting
+
+**Check Operator Health**:
+```bash
+# Check operator deployment
+kubectl get deployment notifier -n babylon-notifier
+
+# Check operator logs
+kubectl logs deployment/notifier -n babylon-notifier
+
+# Check Redis connectivity
+kubectl exec deployment/notifier -n babylon-notifier -- \
+  redis-cli -h redis ping
+```
+
+**Monitor Notification Delivery**:
+```bash
+# Check notification metrics
+kubectl port-forward deployment/notifier -n babylon-notifier 8080:8080
+curl http://localhost:8080/metrics | grep notification
+
+# Check delivery queue status
+kubectl exec deployment/notifier -n babylon-notifier -- \
+  notifier-cli queue-status
+
+# List failed deliveries
+kubectl get events -n babylon-notifier --field-selector type=Warning,reason=DeliveryFailed
+```
+
+**Debug Template Issues**:
+```bash
+# Check template compilation errors
+kubectl get notificationtemplate workshop-started -n babylon-notifier \
+  -o jsonpath='{.status.compilation}'
+
+# Test template with sample data
+kubectl exec deployment/notifier -n babylon-notifier -- \
+  notifier-cli render-template --template workshop-started --data-file sample-data.json
+
+# Validate MJML syntax
+kubectl exec deployment/notifier -n babylon-notifier -- \
+  mjml --validate /path/to/template.mjml
+```
+
+== Integration Patterns
+
+=== With Workshop Manager
+
+Notifier receives events from Workshop Manager for lifecycle notifications:
+
+```yaml
+# Workshop Manager emits events
+apiVersion: v1
+kind: Event
+metadata:
+  name: workshop-provision-complete
+  namespace: user-instructor-jane-20231215
+type: Normal
+reason: WorkshopProvisionComplete
+involvedObject:
+  apiVersion: babylon.gpte.redhat.com/v1
+  kind: Workshop
+  name: openshift-fundamentals-dec2023
+message: "All workshop environments provisioned successfully"
+source:
+  component: workshop-manager
+
+# Notifier processes event and sends notifications
+---
+apiVersion: babylon.gpte.redhat.com/v1
+kind: NotificationRule
+metadata:
+  name: workshop-provisioning
+spec:
+  eventFilters:
+  - eventTypes: ["Normal"]
+    reasons: ["WorkshopProvisionComplete"]
+    sources:
+    - component: "workshop-manager"
+  notifications:
+  - name: "provision-complete"
+    channels: ["instructor-email", "workshop-team-slack"]
+    template: "workshop-provision-complete"
+```
+
+=== With Cost Tracker
+
+Notifier sends budget alerts and cost reports:
+
+```yaml
+# Cost Tracker triggers budget alerts
+apiVersion: v1
+kind: Event
+metadata:
+  name: budget-threshold-exceeded
+  namespace: babylon-cost-tracker
+type: Warning
+reason: BudgetThresholdExceeded
+involvedObject:
+  apiVersion: babylon.gpte.redhat.com/v1
+  kind: CostTrackerState
+  name: aws-cost-tracker
+message: "Monthly budget 80% threshold exceeded: $8,000 of $10,000"
+source:
+  component: cost-tracker
+
+# Automatic escalation for critical budget alerts
+---
+apiVersion: babylon.gpte.redhat.com/v1
+kind: NotificationRule
+metadata:
+  name: budget-alerts
+spec:
+  eventFilters:
+  - eventTypes: ["Warning"]
+    reasons: ["BudgetThresholdExceeded"]
+  notifications:
+  - name: "budget-alert"
+    channels: ["finance-email", "platform-team-slack"]
+    template: "budget-alert"
+    escalation:
+      enabled: true
+      delay: "30m"
+      channels: ["oncall-pager"]
+```
+
+=== With Prometheus Monitoring
+
+Notifier exports metrics and receives Prometheus alerts:
+
+```yaml
+# Prometheus AlertManager webhook
+apiVersion: babylon.gpte.redhat.com/v1
+kind: NotificationChannel
+metadata:
+  name: prometheus-alerts
+  namespace: babylon-notifier
+spec:
+  type: webhook
+  config:
+    url: "http://notifier-webhook:8080/prometheus"
+    method: "POST"
+
+# Process Prometheus alerts
+---
+apiVersion: babylon.gpte.redhat.com/v1
+kind: NotificationRule
+metadata:
+  name: prometheus-alerts
+spec:
+  webhookFilters:
+  - path: "/prometheus"
+    alertname: ["PlatformDown", "HighErrorRate", "DiskSpaceWarning"]
+  notifications:
+  - name: "platform-alert"
+    channels: ["oncall-pager", "platform-team-slack"]
+    template: "prometheus-alert"
+    priority: "critical"
+```
+
+== Performance Tuning
+
+=== Event Processing Optimization
+
+**High-Volume Event Handling**:
+```yaml
+notifier:
+  eventProcessing:
+    # Scale workers based on load
+    workers: 10
+    bufferSize: 5000
+    batchSize: 50
+
+    # Event filtering optimization
+    preFiltering: true
+    filterCaching: true
+
+    # Parallel processing
+    enableParallelProcessing: true
+    maxConcurrentRules: 20
+```
+
+=== Template Rendering Optimization
+
+**Template Performance**:
+```yaml
+notifier:
+  templates:
+    # Template compilation caching
+    cacheSize: 500
+    cacheTTL: "4h"
+    precompileTemplates: true
+
+    # Rendering optimization
+    renderTimeout: "10s"
+    maxConcurrentRenders: 15
+
+    # Memory optimization
+    templateMemoryLimit: "100MB"
+    enableStreamingRender: true
+```
+
+=== Delivery Optimization
+
+**Efficient Notification Delivery**:
+```yaml
+notifier:
+  delivery:
+    # Scale delivery workers
+    workers: 20
+
+    # Batch delivery for email
+    enableBatchDelivery: true
+    batchSize: 25
+    batchWindow: "30s"
+
+    # Connection pooling
+    connectionPoolSize: 10
+    keepAliveTimeout: "60s"
+
+    # Retry optimization
+    exponentialBackoff: true
+    maxBackoffDelay: "5m"
+```
+
+=== Redis Optimization
+
+**State Storage Performance**:
+```yaml
+notifier:
+  redis:
+    # Connection optimization
+    poolSize: 20
+    maxRetries: 3
+
+    # Memory optimization
+    enableCompression: true
+    keyExpiration: "7d"
+
+    # Performance tuning
+    pipeline: true
+    maxPipelineSize: 100
+```
+
+The Notifier Operator provides comprehensive event-driven notification capabilities, enabling stakeholders to stay informed about platform activities and system events through multiple delivery channels with rich template customization and reliable delivery guarantees.

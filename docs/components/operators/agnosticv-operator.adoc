@@ -1,0 +1,426 @@
+= AgnosticV Operator
+
+== Overview
+
+The AgnosticV Operator is a core component of the Babylon Platform responsible for synchronizing catalog definitions from Git repositories and generating Babylon-specific resources. It bridges the gap between AgnosticD configurations stored in Git and the Babylon platform's catalog system.
+
+== Purpose and Responsibilities
+
+=== Primary Functions
+* **Git Repository Management**: Clone and synchronize AgnosticV Git repositories
+* **Component Parsing**: Parse AgnosticD component definitions into Babylon resources
+* **Catalog Generation**: Create and maintain CatalogItem resources
+* **GitHub Integration**: Support for pull request workflows and testing
+* **Execution Environment Management**: Manage Ansible roles and collections for AAP
+
+=== Key Value Propositions
+* **GitOps Workflow**: Infrastructure and catalog definitions managed as code
+* **Automated Synchronization**: Continuous synchronization with source repositories
+* **Pull Request Testing**: Temporary catalog items for testing changes
+* **Execution Environment Support**: Dynamic creation of Ansible execution environments
+
+== Architecture
+
+=== Core Components
+
+==== Repository Manager
+Handles Git repository operations:
+
+```python
+class AgnosticVRepo:
+    def __init__(self, spec):
+        self.url = spec['url']
+        self.ref = spec.get('ref', 'main')
+        self.ssh_key = spec.get('sshKey')
+        self.context_dir = spec.get('contextDir', '')
+
+    async def sync(self):
+        """Synchronize repository content"""
+        await self.clone_or_pull()
+        return await self.parse_components()
+```
+
+==== Component Parser
+Parses AgnosticD component definitions:
+
+```python
+async def parse_component(self, component_path):
+    """Parse AgnosticD component into Babylon format"""
+    agnosticv_data = load_agnosticv_config(component_path)
+
+    return {
+        'metadata': extract_metadata(agnosticv_data),
+        'spec': transform_to_babylon_spec(agnosticv_data),
+        'resources': generate_resource_templates(agnosticv_data)
+    }
+```
+
+==== Catalog Generator
+Creates CatalogItem resources:
+
+```python
+async def create_catalog_item(self, component):
+    """Generate CatalogItem from component definition"""
+    catalog_item = {
+        'apiVersion': 'babylon.gpte.redhat.com/v1',
+        'kind': 'CatalogItem',
+        'metadata': {
+            'name': component['name'],
+            'namespace': self.catalog_namespace,
+            'labels': {
+                'babylon.gpte.redhat.com/agnosticv-repo': self.repo_name
+            }
+        },
+        'spec': component['spec']
+    }
+
+    await self.k8s_client.create(catalog_item)
+```
+
+=== Resource Model
+
+==== AgnosticVRepo Custom Resource
+Defines Git repository configuration:
+
+```yaml
+apiVersion: gpte.redhat.com/v1
+kind: AgnosticVRepo
+metadata:
+  name: gpte-agnosticv
+  namespace: babylon-config
+spec:
+  url: git@github.com:redhat-gpe/agnosticv.git
+  ref: main
+  contextDir: ""
+  sshKey: agnosticv-ssh-key
+  gitHub:
+    token: github-token
+    preloadPullRequests:
+      mode: override
+  babylonAnarchyRoles:
+  - name: babylon_anarchy_governor
+    src: https://github.com/rhpds/babylon_anarchy_governor.git
+    version: v0.30.3
+  executionEnvironmentAllowList:
+  - image: ^quay.io/agnosticd/ee-
+  - name: ^Default execution environment$
+```
+
+==== AgnosticVComponent Custom Resource
+Represents parsed component definition:
+
+```yaml
+apiVersion: gpte.redhat.com/v1
+kind: AgnosticVComponent
+metadata:
+  name: openshift-workshop
+  namespace: babylon-config
+spec:
+  agnosticvRepo: gpte-agnosticv
+  path: ansible/configs/ocp-workshop
+  definition:
+    # Raw AgnosticD component definition
+    cloud_provider: ec2
+    env_type: ocp-workshop
+    software_to_deploy: openshift
+    # ... additional configuration
+```
+
+== Configuration
+
+=== Helm Values
+Key configuration options:
+
+```yaml
+agnosticv:
+  deploy: true
+
+  # Git repository configurations
+  repositories:
+    gpte-agnosticv:
+      url: git@github.com:redhat-gpe/agnosticv.git
+      ref: main
+      sshKey: agnosticv-ssh-key
+      gitHub:
+        token: github-token
+        preloadPullRequests:
+          mode: override
+
+  # Execution environment configuration
+  executionEnvironmentAllowList:
+  - image: ^registry.redhat.io/
+  - image: ^quay.io/agnosticd/ee-
+  - name: ^Default execution environment$
+
+  # Operator configuration
+  operator:
+    image:
+      repository: quay.io/rhpds/babylon-agnosticv-operator
+      tag: v1.12.0
+    resources:
+      limits:
+        cpu: "1"
+        memory: 512Mi
+      requests:
+        cpu: 500m
+        memory: 256Mi
+
+  # Polling configuration
+  pollingInterval: 1m
+```
+
+=== Environment Variables
+
+```bash
+# API Group Configuration
+AGNOSTICV_API_GROUP=gpte.redhat.com
+AGNOSTICV_VERSION=v1
+CATALOG_API_GROUP=babylon.gpte.redhat.com
+CATALOG_VERSION=v1
+
+# External System Configuration
+ANARCHY_API_GROUP=anarchy.gpte.redhat.com
+RESOURCE_BROKER_API_GROUP=poolboy.gpte.redhat.com
+RESOURCE_BROKER_NAMESPACE=poolboy
+
+# Execution Environment Configuration
+EXECUTION_ENVIRONMENT_ALLOW_LIST='[{"image": "^registry.redhat.io/"}, ...]'
+
+# Polling Configuration
+POLLING_INTERVAL=1m
+```
+
+== Operations
+
+=== Deployment
+
+==== Prerequisites
+* OpenShift/Kubernetes cluster with admin access
+* Git repository access (SSH keys for private repositories)
+* GitHub access token (for GitHub integration)
+
+==== Installation via Helm
+```bash
+# Create namespace
+oc create namespace babylon-config
+
+# Create SSH key secret (if using private repositories)
+oc create secret generic agnosticv-ssh-key \
+  --from-file=ssh-privatekey=/path/to/private/key \
+  --type=kubernetes.io/ssh-auth \
+  -n babylon-config
+
+# Create GitHub token secret (if using GitHub integration)
+oc create secret generic github-token \
+  --from-literal=token=ghp_xxxxxxxxxxxxxxxxxxxx \
+  -n babylon-config
+
+# Install operator
+helm upgrade --install agnosticv-operator ./helm \
+  --namespace babylon-config \
+  --set agnosticv.repositories.gpte-agnosticv.url=git@github.com:example/agnosticv.git \
+  --set agnosticv.repositories.gpte-agnosticv.sshKey=agnosticv-ssh-key \
+  --set agnosticv.repositories.gpte-agnosticv.gitHub.token=github-token
+```
+
+==== Post-Installation Verification
+```bash
+# Check operator deployment
+oc get deployment babylon-agnosticv-operator -n babylon-config
+
+# Check AgnosticVRepo status
+oc get agnosticvrepos -n babylon-config
+
+# Check generated components
+oc get agnosticvcomponents -n babylon-config
+
+# Check generated catalog items
+oc get catalogitems -A
+```
+
+=== Monitoring
+
+==== Key Metrics
+```prometheus
+# Repository synchronization metrics
+agnosticv_repo_sync_total{repo="gpte-agnosticv", status="success"}
+agnosticv_repo_sync_duration_seconds{repo="gpte-agnosticv"}
+
+# Component processing metrics
+agnosticv_components_processed_total{repo="gpte-agnosticv"}
+agnosticv_catalog_items_created_total{repo="gpte-agnosticv"}
+
+# Error metrics
+agnosticv_errors_total{repo="gpte-agnosticv", error_type="git_clone"}
+agnosticv_errors_total{repo="gpte-agnosticv", error_type="component_parse"}
+```
+
+==== Health Checks
+```bash
+# Check operator health
+curl http://localhost:8080/health/live
+curl http://localhost:8080/health/ready
+
+# Check metrics endpoint
+curl http://localhost:8080/metrics
+```
+
+==== Log Analysis
+```bash
+# View operator logs
+oc logs deployment/babylon-agnosticv-operator -n babylon-config
+
+# Watch for specific events
+oc logs deployment/babylon-agnosticv-operator -n babylon-config | grep "AgnosticVRepo"
+```
+
+=== Troubleshooting
+
+==== Common Issues
+
+===== Git Authentication Failures
+```bash
+# Check SSH key secret
+oc get secret agnosticv-ssh-key -n babylon-config -o yaml
+
+# Verify SSH key format
+oc get secret agnosticv-ssh-key -n babylon-config -o jsonpath='{.data.ssh-privatekey}' | base64 -d | head -n 1
+
+# Check repository accessibility
+oc run git-test --image=alpine/git --rm -it -- sh
+> git clone git@github.com:example/agnosticv.git
+```
+
+===== Component Parsing Errors
+```bash
+# Check component parsing logs
+oc logs deployment/babylon-agnosticv-operator -n babylon-config | grep "parse_component"
+
+# Validate component definition manually
+oc exec deployment/babylon-agnosticv-operator -n babylon-config -- \
+  python3 -c "import yaml; print(yaml.safe_load(open('/path/to/component.yml')))"
+```
+
+===== GitHub Integration Issues
+```bash
+# Check GitHub token permissions
+curl -H "Authorization: token ghp_xxxxxxxxxxxxxxxxxxxx" \
+  https://api.github.com/repos/example/agnosticv
+
+# Verify webhook delivery
+# Check GitHub repository settings → Webhooks → Recent Deliveries
+```
+
+==== Recovery Procedures
+
+===== Force Repository Resync
+```bash
+# Delete and recreate AgnosticVRepo
+oc delete agnosticvrepo gpte-agnosticv -n babylon-config
+oc apply -f agnosticv-repo.yaml
+```
+
+===== Clean Component Cache
+```bash
+# Delete all components for resync
+oc delete agnosticvcomponents -l agnosticv-repo=gpte-agnosticv -n babylon-config
+```
+
+== Development
+
+=== Local Development Setup
+
+==== Prerequisites
+```bash
+# Install development tools
+pip install kopf kubernetes-asyncio
+
+# Set up development environment
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+==== Development with odo
+```bash
+# Create development namespace
+oc new-project babylon-agnosticv-dev
+
+# Install CRDs and RBAC
+helm template helm/ --include-crds --set deploy=false | oc apply -f -
+
+# Grant permissions
+oc adm policy add-cluster-role-to-user babylon-agnosticv-operator -z default
+
+# Start development
+odo dev --devfile devfile.yaml
+```
+
+=== Testing
+
+==== Unit Tests
+```bash
+# Run unit tests
+python -m pytest tests/unit/
+
+# Run with coverage
+python -m pytest tests/unit/ --cov=operator --cov-report=html
+```
+
+==== Integration Tests
+```bash
+# Run integration tests against cluster
+ansible-playbook test/playbook.yaml
+
+# Test specific functionality
+ansible-playbook test/playbook.yaml --tags git_sync
+```
+
+=== Adding New Features
+
+==== Component Parser Extensions
+```python
+def parse_custom_component_type(self, component_data):
+    """Add support for new component types"""
+    if component_data.get('type') == 'custom_type':
+        return self.transform_custom_type(component_data)
+    return None
+```
+
+==== GitHub Integration Enhancements
+```python
+async def handle_github_webhook(self, webhook_data):
+    """Process GitHub webhook events"""
+    if webhook_data['action'] == 'opened':
+        await self.create_pr_components(webhook_data['pull_request'])
+    elif webhook_data['action'] == 'closed':
+        await self.cleanup_pr_components(webhook_data['pull_request'])
+```
+
+== Best Practices
+
+=== Repository Organization
+* Use consistent directory structures in AgnosticV repositories
+* Include comprehensive metadata in component definitions
+* Implement proper tagging and branching strategies
+* Maintain backward compatibility for component schemas
+
+=== Security Considerations
+* Use SSH keys with minimal required permissions
+* Rotate GitHub tokens regularly
+* Implement network policies for repository access
+* Audit repository access patterns
+
+=== Performance Optimization
+* Configure appropriate polling intervals for repository size
+* Use incremental sync for large repositories
+* Implement caching for frequently accessed components
+* Monitor memory usage for large component definitions
+
+=== Operational Excellence
+* Monitor repository sync health and performance
+* Implement alerting for sync failures
+* Maintain repository access documentation
+* Plan for disaster recovery scenarios
+
+The AgnosticV Operator provides the foundation for Babylon's GitOps-driven catalog management, enabling organizations to maintain infrastructure definitions as code while providing seamless integration with the platform's provisioning capabilities.

@@ -1,0 +1,755 @@
+= Instructor Guide
+
+== Overview
+
+This guide provides comprehensive instructions for instructors using the Babylon Platform to deliver workshops, training sessions, and educational content. It covers workshop setup, student management, resource provisioning, and best practices for effective workshop delivery.
+
+== Getting Started
+
+=== Instructor Access and Permissions
+
+==== Account Setup
+Before delivering workshops, ensure your account has instructor privileges:
+
+```bash
+# Verify instructor access
+oc auth can-i create workshops.babylon.gpte.redhat.com
+oc auth can-i create resourceclaims.poolboy.gpte.redhat.com
+oc auth can-i create namespaces
+
+# Check available catalog items
+oc get catalogitems -A | grep -E "(workshop|training|lab)"
+```
+
+==== Namespace Creation
+Instructors work within dedicated namespaces for their courses:
+
+```bash
+# Create instructor namespace
+oc create namespace user-instructor-$(whoami)-$(date +%Y%m%d)
+
+# Label for identification
+oc label namespace user-instructor-$(whoami)-$(date +%Y%m%d) \
+  babylon.gpte.redhat.com/type=instructor-workspace \
+  babylon.gpte.redhat.com/instructor=$(whoami)
+```
+
+=== Accessing the Platform
+
+==== Catalog UI Access
+```bash
+# Get catalog URL
+CATALOG_URL=$(oc get route babylon-catalog-ui -n babylon-catalog -o jsonpath='{.spec.host}')
+echo "Catalog UI: https://$CATALOG_URL"
+
+# Access with your OpenShift credentials
+# Navigate to Instructor Dashboard for advanced features
+```
+
+==== Command Line Access
+```bash
+# Set up CLI environment
+export BABYLON_NAMESPACE="user-instructor-$(whoami)-$(date +%Y%m%d)"
+export BABYLON_API="https://$(oc get route babylon-catalog-api -n babylon-catalog -o jsonpath='{.spec.host}')"
+
+# Test API access
+curl -H "Authorization: Bearer $(oc whoami -t)" \
+  "$BABYLON_API/api/catalog/v1/user"
+```
+
+== Workshop Planning and Setup
+
+=== Pre-Workshop Planning
+
+==== Workshop Requirements Assessment
+```bash
+# Review available workshop catalog items
+oc get catalogitems -A -o custom-columns=NAME:.metadata.name,CATEGORY:.spec.category,DURATION:.spec.runtime.estimatedTime,DIFFICULTY:.spec.runtime.difficulty --sort-by=.spec.category
+
+# Get detailed workshop information
+oc get catalogitem openshift-fundamentals -n babylon-catalog-workshops -o yaml | \
+  yq eval '.spec | {displayName, description, runtime, parameters, resources}' -
+```
+
+==== Capacity Planning
+```yaml
+# Workshop planning template
+workshop_plan:
+  name: "OpenShift Fundamentals Workshop"
+  date: "2023-12-15"
+  duration: "6 hours"
+
+  participants:
+    expected: 25
+    maximum: 30
+
+  resources_per_participant:
+    cpu: "4 cores"
+    memory: "16GB"
+    storage: "100GB"
+    estimated_cost: "$5.00/hour"
+
+  total_resources:
+    cpu: "120 cores"  # 30 * 4
+    memory: "480GB"   # 30 * 16
+    storage: "3TB"    # 30 * 100
+    estimated_cost: "$150/hour"
+
+  timeline:
+    setup_start: "2023-12-14T18:00:00Z"
+    workshop_start: "2023-12-15T09:00:00Z"
+    workshop_end: "2023-12-15T17:00:00Z"
+    cleanup_complete: "2023-12-15T20:00:00Z"
+```
+
+=== Workshop Creation
+
+==== Basic Workshop Setup
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: Workshop
+metadata:
+  name: openshift-fundamentals-dec2023
+  namespace: user-instructor-janedoe-20231215
+  labels:
+    babylon.gpte.redhat.com/instructor: janedoe
+    babylon.gpte.redhat.com/workshop-type: training
+spec:
+  displayName: "OpenShift Fundamentals - December 2023"
+  description: "Hands-on introduction to OpenShift for developers"
+
+  # Access configuration
+  accessPassword: "openshift2023"
+  openRegistration: false  # Controlled enrollment
+
+  # Workshop scheduling
+  lifespan:
+    start: "2023-12-15T09:00:00Z"
+    end: "2023-12-15T17:00:00Z"
+    maximum: "10h"  # Buffer time
+
+  actionSchedule:
+    start: "2023-12-15T08:30:00Z"  # 30 min before workshop
+    stop: "2023-12-15T18:00:00Z"   # 1 hour after workshop
+
+  # Lab interface settings
+  labUserInterface:
+    redirect: true
+    customization:
+      theme: "openshift"
+      welcomeMessage: "Welcome to OpenShift Fundamentals!"
+      supportContact: "jane.doe@example.com"
+```
+
+==== Workshop Provisioning Configuration
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: WorkshopProvision
+metadata:
+  name: openshift-fundamentals-provision
+  namespace: user-instructor-janedoe-20231215
+spec:
+  workshopName: openshift-fundamentals-dec2023
+
+  # Catalog item reference
+  catalogItem:
+    name: openshift-fundamentals
+    namespace: babylon-catalog-workshops
+
+  # Bulk provisioning settings
+  count: 30
+  concurrency: 5  # Provision 5 at a time
+  startDelay: 60  # 60 seconds between batches
+
+  # Enable resource pools for faster provisioning
+  enableResourcePools: true
+
+  # Provision timing
+  lifespan:
+    start: "2023-12-14T20:00:00Z"  # Provision night before
+    end: "2023-12-15T18:00:00Z"
+
+  # Workshop-specific parameters
+  parameters:
+    user_count: 1
+    openshift_version: "4.12"
+    aws_region: "us-east-1"
+    enable_monitoring: true
+    cluster_size: "medium"
+```
+
+==== Student Registration Management
+```yaml
+# Pre-registered student list
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: workshop-participants
+  namespace: user-instructor-janedoe-20231215
+data:
+  participants.yaml: |
+    participants:
+    - email: "alice@company.com"
+      name: "Alice Johnson"
+      role: "Developer"
+      experience: "beginner"
+    - email: "bob@company.com"
+      name: "Bob Smith"
+      role: "DevOps Engineer"
+      experience: "intermediate"
+    - email: "carol@company.com"
+      name: "Carol Wilson"
+      role: "System Administrator"
+      experience: "beginner"
+```
+
+```bash
+# Create user assignments from participant list
+while read email name; do
+  USERNAME=$(echo $email | cut -d@ -f1 | tr '.' '-')
+
+  cat <<EOF | oc apply -f -
+apiVersion: babylon.gpte.redhat.com/v1
+kind: WorkshopUserAssignment
+metadata:
+  name: workshop-user-$USERNAME
+  namespace: user-instructor-janedoe-20231215
+spec:
+  workshopName: openshift-fundamentals-dec2023
+  assignment:
+    email: "$email"
+    displayName: "$name"
+  userName: "$USERNAME"
+  labUserInterface:
+    redirect: true
+EOF
+
+done < <(yq eval '.participants[] | .email + " " + .name' participants.yaml)
+```
+
+== Workshop Delivery
+
+=== Pre-Workshop Setup
+
+==== Environment Verification
+```bash
+#!/bin/bash
+# Pre-workshop checklist script
+
+WORKSHOP_NAMESPACE="user-instructor-janedoe-20231215"
+WORKSHOP_NAME="openshift-fundamentals-dec2023"
+
+echo "=== Pre-Workshop Setup Verification ==="
+
+# Check workshop status
+echo "1. Checking workshop configuration..."
+oc get workshop $WORKSHOP_NAME -n $WORKSHOP_NAMESPACE -o yaml | \
+  yq eval '{status: .status.phase, participants: .status.summary.assigned}'
+
+# Check provision status
+echo "2. Checking resource provisioning..."
+oc get workshopprovisions -n $WORKSHOP_NAMESPACE -o custom-columns=NAME:.metadata.name,STATUS:.status.phase,READY:.status.summary.ready,TOTAL:.spec.count
+
+# Check user assignments
+echo "3. Checking user assignments..."
+oc get workshopuserassignments -n $WORKSHOP_NAMESPACE -o custom-columns=USER:.spec.userName,EMAIL:.spec.assignment.email,STATUS:.status.phase,URL:.status.labUserInterface.url
+
+# Verify lab interfaces
+echo "4. Testing lab interface accessibility..."
+oc get workshopuserassignments -n $WORKSHOP_NAMESPACE -o jsonpath='{.items[*].status.labUserInterface.url}' | \
+  tr ' ' '\n' | head -3 | while read url; do
+  if [ ! -z "$url" ]; then
+    echo "Testing: $url"
+    curl -s -o /dev/null -w "%{http_code}\n" "$url"
+  fi
+done
+
+echo "=== Pre-Workshop Setup Complete ==="
+```
+
+==== Workshop Materials Preparation
+```bash
+# Create workshop materials configmap
+oc create configmap workshop-materials \
+  --from-file=lab-guide.adoc \
+  --from-file=setup-instructions.md \
+  --from-file=troubleshooting-guide.md \
+  -n $WORKSHOP_NAMESPACE
+
+# Create shared resources for workshop
+cat <<EOF | oc apply -f -
+apiVersion: v1
+kind: Secret
+metadata:
+  name: workshop-shared-credentials
+  namespace: $WORKSHOP_NAMESPACE
+stringData:
+  registry-username: "workshop-user"
+  registry-password: "workshop-pass"
+  shared-api-key: "abc123def456"
+EOF
+```
+
+=== During Workshop Delivery
+
+==== Real-Time Monitoring
+```bash
+# Monitor workshop progress dashboard
+while true; do
+  clear
+  echo "=== Workshop Status Dashboard - $(date) ==="
+
+  # Overall workshop status
+  echo "Workshop: $WORKSHOP_NAME"
+  oc get workshop $WORKSHOP_NAME -n $WORKSHOP_NAMESPACE -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown"
+
+  # User assignment status
+  echo -e "\nUser Assignment Status:"
+  oc get workshopuserassignments -n $WORKSHOP_NAMESPACE -o jsonpath='{range .items[*]}{.spec.userName}{"\t"}{.status.phase}{"\t"}{.status.labUserInterface.url}{"\n"}{end}' | column -t
+
+  # Resource claim health
+  echo -e "\nResource Claim Health:"
+  oc get resourceclaims -n $WORKSHOP_NAMESPACE -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.phase}{"\t"}{.status.summary.healthy}/{.status.summary.total}{"\n"}{end}' | column -t
+
+  sleep 30
+done
+```
+
+==== Student Support
+```bash
+# Student support toolkit
+
+# Function to reset student environment
+reset_student_environment() {
+  local username=$1
+  local assignment_name="workshop-user-$username"
+
+  echo "Resetting environment for: $username"
+
+  # Delete and recreate user assignment
+  oc delete workshopuserassignment $assignment_name -n $WORKSHOP_NAMESPACE
+  sleep 10
+
+  # Find available resource claim
+  available_claim=$(oc get resourceclaims -n $WORKSHOP_NAMESPACE \
+    --field-selector=status.phase=Ready \
+    -o jsonpath='{.items[0].metadata.name}')
+
+  # Create new user assignment
+  cat <<EOF | oc apply -f -
+apiVersion: babylon.gpte.redhat.com/v1
+kind: WorkshopUserAssignment
+metadata:
+  name: $assignment_name
+  namespace: $WORKSHOP_NAMESPACE
+spec:
+  workshopName: $WORKSHOP_NAME
+  resourceClaimName: $available_claim
+  userName: $username
+  labUserInterface:
+    redirect: true
+EOF
+
+  echo "Environment reset complete for: $username"
+}
+
+# Function to extend student environment
+extend_student_environment() {
+  local username=$1
+  local hours=$2
+  local assignment_name="workshop-user-$username"
+
+  echo "Extending environment for $username by $hours hours"
+
+  # Calculate new end time
+  new_end_time=$(date -u -d "+${hours} hours" +%Y-%m-%dT%H:%M:%SZ)
+
+  # Update resource claim lifespan
+  resource_claim=$(oc get workshopuserassignment $assignment_name -n $WORKSHOP_NAMESPACE -o jsonpath='{.spec.resourceClaimName}')
+
+  oc patch resourceclaim $resource_claim -n $WORKSHOP_NAMESPACE \
+    --type=merge -p "{\"spec\":{\"lifespan\":{\"end\":\"$new_end_time\"}}}"
+
+  echo "Extended environment until: $new_end_time"
+}
+
+# Function to get student access info
+get_student_access_info() {
+  local username=$1
+  local assignment_name="workshop-user-$username"
+
+  echo "=== Access Information for: $username ==="
+
+  # Get lab interface URL
+  lab_url=$(oc get workshopuserassignment $assignment_name -n $WORKSHOP_NAMESPACE -o jsonpath='{.status.labUserInterface.url}')
+  echo "Lab Interface: $lab_url"
+
+  # Get resource claim details
+  resource_claim=$(oc get workshopuserassignment $assignment_name -n $WORKSHOP_NAMESPACE -o jsonpath='{.spec.resourceClaimName}')
+  echo "Resource Claim: $resource_claim"
+
+  # Get access credentials
+  oc get resourceclaim $resource_claim -n $WORKSHOP_NAMESPACE -o jsonpath='{.status.resources[0].credentials}' | jq '.'
+}
+```
+
+==== Interactive Workshop Management
+```bash
+# Workshop management CLI tool
+workshop_control() {
+  case $1 in
+    "status")
+      echo "=== Workshop Status ==="
+      oc get workshop $WORKSHOP_NAME -n $WORKSHOP_NAMESPACE -o yaml | \
+        yq eval '{status: .status, summary: .status.summary}'
+      ;;
+
+    "extend")
+      local hours=${2:-2}
+      echo "Extending workshop by $hours hours..."
+      new_end_time=$(date -u -d "+${hours} hours" +%Y-%m-%dT%H:%M:%SZ)
+      oc patch workshop $WORKSHOP_NAME -n $WORKSHOP_NAMESPACE \
+        --type=merge -p "{\"spec\":{\"lifespan\":{\"end\":\"$new_end_time\"}}}"
+      ;;
+
+    "pause")
+      echo "Pausing workshop provisioning..."
+      oc patch workshop $WORKSHOP_NAME -n $WORKSHOP_NAMESPACE \
+        --type=merge -p '{"spec":{"provisionDisabled":true}}'
+      ;;
+
+    "resume")
+      echo "Resuming workshop provisioning..."
+      oc patch workshop $WORKSHOP_NAME -n $WORKSHOP_NAMESPACE \
+        --type=merge -p '{"spec":{"provisionDisabled":false}}'
+      ;;
+
+    "emergency-stop")
+      echo "Emergency workshop stop..."
+      oc patch workshop $WORKSHOP_NAME -n $WORKSHOP_NAMESPACE \
+        --type=merge -p "{\"spec\":{\"actionSchedule\":{\"stop\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}}}"
+      ;;
+
+    *)
+      echo "Usage: workshop_control {status|extend [hours]|pause|resume|emergency-stop}"
+      ;;
+  esac
+}
+```
+
+=== Post-Workshop Management
+
+==== Workshop Cleanup
+```bash
+#!/bin/bash
+# Post-workshop cleanup script
+
+echo "=== Post-Workshop Cleanup ==="
+
+# Allow graceful shutdown period
+echo "Starting graceful shutdown (30 minutes from now)..."
+shutdown_time=$(date -u -d "+30 minutes" +%Y-%m-%dT%H:%M:%SZ)
+
+oc patch workshop $WORKSHOP_NAME -n $WORKSHOP_NAMESPACE \
+  --type=merge -p "{\"spec\":{\"actionSchedule\":{\"stop\":\"$shutdown_time\"}}}"
+
+# Export workshop analytics
+echo "Exporting workshop analytics..."
+oc get workshopuserassignments -n $WORKSHOP_NAMESPACE -o json > workshop-analytics-$(date +%Y%m%d).json
+
+# Generate attendance report
+echo "Generating attendance report..."
+cat <<EOF > workshop-report-$(date +%Y%m%d).md
+# Workshop Report: $WORKSHOP_NAME
+
+## Overview
+- Date: $(date +%Y-%m-%d)
+- Duration: $(oc get workshop $WORKSHOP_NAME -n $WORKSHOP_NAMESPACE -o jsonpath='{.spec.lifespan.start}') to $(oc get workshop $WORKSHOP_NAME -n $WORKSHOP_NAMESPACE -o jsonpath='{.spec.lifespan.end}')
+- Instructor: $(oc get workshop $WORKSHOP_NAME -n $WORKSHOP_NAMESPACE -o jsonpath='{.metadata.labels.babylon\.gpte\.redhat\.com/instructor}')
+
+## Attendance
+Total Registered: $(oc get workshopuserassignments -n $WORKSHOP_NAMESPACE --no-headers | wc -l)
+Successfully Provisioned: $(oc get workshopuserassignments -n $WORKSHOP_NAMESPACE -o jsonpath='{.items[?(@.status.phase=="Ready")]}' | jq length)
+
+## Resource Usage
+$(oc get resourceclaims -n $WORKSHOP_NAMESPACE -o custom-columns=NAME:.metadata.name,STATUS:.status.phase,COST:.status.summary.cost.current --no-headers)
+
+## Issues Encountered
+$(oc get events -n $WORKSHOP_NAMESPACE --field-selector type=Warning --no-headers | wc -l) warning events recorded
+
+EOF
+
+echo "Workshop cleanup initiated. Resources will be cleaned up at: $shutdown_time"
+```
+
+==== Student Feedback Collection
+```yaml
+# Create feedback collection form
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: workshop-feedback-form
+  namespace: user-instructor-janedoe-20231215
+data:
+  feedback-form.html: |
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Workshop Feedback</title>
+        <style>
+            body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
+            .form-group { margin-bottom: 20px; }
+            label { display: block; margin-bottom: 5px; font-weight: bold; }
+            input, select, textarea { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+            button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
+        </style>
+    </head>
+    <body>
+        <h1>Workshop Feedback: OpenShift Fundamentals</h1>
+        <form action="/api/feedback" method="POST">
+            <div class="form-group">
+                <label>Overall Rating:</label>
+                <select name="rating" required>
+                    <option value="">Select rating...</option>
+                    <option value="5">Excellent (5)</option>
+                    <option value="4">Good (4)</option>
+                    <option value="3">Average (3)</option>
+                    <option value="2">Poor (2)</option>
+                    <option value="1">Very Poor (1)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>What did you like most?</label>
+                <textarea name="liked_most" rows="3"></textarea>
+            </div>
+            <div class="form-group">
+                <label>What could be improved?</label>
+                <textarea name="improvements" rows="3"></textarea>
+            </div>
+            <div class="form-group">
+                <label>Would you recommend this workshop?</label>
+                <select name="recommend" required>
+                    <option value="">Select...</option>
+                    <option value="yes">Yes</option>
+                    <option value="no">No</option>
+                    <option value="maybe">Maybe</option>
+                </select>
+            </div>
+            <button type="submit">Submit Feedback</button>
+        </form>
+    </body>
+    </html>
+```
+
+## Best Practices for Workshop Delivery
+
+=== Preparation Best Practices
+
+==== Workshop Planning Checklist
+```bash
+# Pre-workshop checklist (1 week before)
+checklist_pre_workshop() {
+  echo "=== Pre-Workshop Checklist ==="
+
+  # Infrastructure verification
+  echo "□ Verify catalog item availability and version"
+  echo "□ Test provision workflow with small batch"
+  echo "□ Confirm resource quotas and limits"
+  echo "□ Verify external network access requirements"
+
+  # Content preparation
+  echo "□ Update lab guide with current screenshots"
+  echo "□ Test all lab exercises end-to-end"
+  echo "□ Prepare troubleshooting scenarios"
+  echo "□ Create backup plans for common issues"
+
+  # Logistics
+  echo "□ Confirm participant list and contact info"
+  echo "□ Send pre-workshop setup instructions"
+  echo "□ Schedule infrastructure provisioning"
+  echo "□ Prepare emergency contact procedures"
+}
+
+# Day-of-workshop checklist
+checklist_workshop_day() {
+  echo "=== Workshop Day Checklist ==="
+
+  # Pre-session (2 hours before)
+  echo "□ Verify all environments are provisioned"
+  echo "□ Test lab interface accessibility"
+  echo "□ Confirm instructor demo environment"
+  echo "□ Verify support escalation contacts"
+
+  # Session start (30 minutes before)
+  echo "□ Welcome early arrivals"
+  echo "□ Test screen sharing and audio"
+  echo "□ Distribute access credentials"
+  echo "□ Start workshop monitoring dashboard"
+}
+```
+
+=== Resource Management Best Practices
+
+==== Efficient Resource Utilization
+```yaml
+# Resource optimization strategies
+resource_optimization:
+  pre_provisioning:
+    - use_resource_pools: true
+    - provision_timing: "night_before"
+    - buffer_percentage: 10  # 10% extra resources
+
+  during_workshop:
+    - monitor_utilization: true
+    - scale_on_demand: false  # Avoid disruption
+    - track_performance: true
+
+  cleanup:
+    - graceful_shutdown_time: "30_minutes"
+    - force_cleanup_after: "2_hours"
+    - preserve_artifacts: "24_hours"
+```
+
+```bash
+# Resource monitoring during workshop
+monitor_resources() {
+  while true; do
+    echo "=== Resource Utilization - $(date) ==="
+
+    # CPU and memory usage
+    oc top pods -n $WORKSHOP_NAMESPACE --sort-by=cpu | head -10
+
+    # Storage usage
+    oc get pvc -n $WORKSHOP_NAMESPACE -o custom-columns=NAME:.metadata.name,CAPACITY:.spec.resources.requests.storage,USED:.status.capacity.storage
+
+    # Network performance
+    oc get resourceclaims -n $WORKSHOP_NAMESPACE -o jsonpath='{range .items[*]}{.metadata.name}: {.status.summary.networkLatency}ms{"\n"}{end}'
+
+    sleep 300  # Check every 5 minutes
+  done
+}
+```
+
+=== Student Experience Optimization
+
+==== Proactive Student Support
+```bash
+# Automated student environment health checks
+check_student_environments() {
+  echo "=== Student Environment Health Check ==="
+
+  # Check for failed assignments
+  failed_assignments=$(oc get workshopuserassignments -n $WORKSHOP_NAMESPACE -o jsonpath='{.items[?(@.status.phase=="Failed")].spec.userName}')
+
+  if [ ! -z "$failed_assignments" ]; then
+    echo "ALERT: Failed assignments detected:"
+    echo "$failed_assignments"
+
+    # Auto-remediation for failed assignments
+    for username in $failed_assignments; do
+      echo "Auto-remediating assignment for: $username"
+      reset_student_environment $username
+    done
+  fi
+
+  # Check for slow environments
+  slow_environments=$(oc get resourceclaims -n $WORKSHOP_NAMESPACE -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.summary.performanceScore}{"\n"}{end}' | awk '$2 < 70 {print $1}')
+
+  if [ ! -z "$slow_environments" ]; then
+    echo "WARNING: Slow environments detected:"
+    echo "$slow_environments"
+  fi
+
+  # Check lab interface accessibility
+  oc get workshopuserassignments -n $WORKSHOP_NAMESPACE -o jsonpath='{.items[*].status.labUserInterface.url}' | \
+    tr ' ' '\n' | while read url; do
+    if [ ! -z "$url" ]; then
+      response_time=$(curl -o /dev/null -s -w "%{time_total}" "$url" || echo "ERROR")
+      if [[ "$response_time" =~ ^[0-9] ]] && (( $(echo "$response_time > 5" | bc -l) )); then
+        echo "WARNING: Slow lab interface: $url ($response_time seconds)"
+      fi
+    fi
+  done
+}
+```
+
+=== Advanced Workshop Scenarios
+
+==== Multi-Day Workshop Management
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: Workshop
+metadata:
+  name: advanced-openshift-5day
+  namespace: user-instructor-expert-20231210
+spec:
+  displayName: "Advanced OpenShift - 5 Day Intensive"
+
+  # Multi-day scheduling
+  lifespan:
+    start: "2023-12-11T09:00:00Z"
+    end: "2023-12-15T17:00:00Z"
+    maximum: "144h"  # 6 days total (including setup/cleanup)
+
+  # Daily action schedule
+  actionSchedule:
+    start: "2023-12-11T08:30:00Z"
+    stop: "2023-12-15T18:00:00Z"
+    dailySchedule:
+      start: "08:30"
+      end: "17:30"
+      timezone: "America/New_York"
+
+  # Progressive complexity
+  modules:
+  - name: "day1-fundamentals"
+    catalogItem: "openshift-fundamentals"
+    parameters:
+      complexity: "basic"
+  - name: "day2-networking"
+    catalogItem: "openshift-networking"
+    parameters:
+      complexity: "intermediate"
+  - name: "day3-operators"
+    catalogItem: "operator-development"
+    parameters:
+      complexity: "advanced"
+```
+
+==== Hybrid Workshop Delivery
+```yaml
+# Hybrid workshop configuration (in-person + remote)
+apiVersion: babylon.gpte.redhat.com/v1
+kind: Workshop
+metadata:
+  name: hybrid-workshop-q4-2023
+  namespace: user-instructor-hybrid-20231120
+spec:
+  displayName: "Hybrid OpenShift Workshop"
+
+  # Mixed access modes
+  accessModes:
+  - name: "in-person"
+    type: "lab-network"
+    participants: 15
+    network: "internal"
+  - name: "remote"
+    type: "external-access"
+    participants: 10
+    network: "public"
+
+  # Different resource allocations
+  resourceProfiles:
+  - name: "in-person-profile"
+    resources:
+      cpu: "2 cores"
+      memory: "8GB"
+      network: "low-latency"
+  - name: "remote-profile"
+    resources:
+      cpu: "4 cores"
+      memory: "16GB"
+      network: "high-bandwidth"
+```
+
+This comprehensive instructor guide provides all the tools and knowledge needed to successfully deliver engaging, well-managed workshops using the Babylon Platform.

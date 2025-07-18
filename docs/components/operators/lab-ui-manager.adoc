@@ -1,0 +1,618 @@
+= Lab UI Manager Operator
+
+== Overview
+
+The Lab UI Manager Operator is a Kubernetes operator that manages dynamic lab user interfaces through Bookbag deployments. It provides on-demand lab environment creation, manages lab content delivery, and handles user interface lifecycle for workshop participants. The operator enables instructors to provide consistent, browser-based lab experiences that integrate seamlessly with provisioned infrastructure.
+
+== Architecture
+
+=== Core Components
+
+==== Lab UI Controller
+Main operator process that watches for BookbagBuild and BookbagDeployment custom resources and orchestrates lab interface deployment.
+
+==== Content Builder
+Builds lab content containers from Git repositories containing workshop instructions and lab guides.
+
+==== Deployment Manager
+Manages individual lab interface deployments, including ingress configuration and resource allocation.
+
+==== Integration Bridge
+Coordinates with Workshop Manager and resource provisioning systems to provide dynamic lab environments.
+
+== Custom Resources
+
+=== BookbagBuild
+
+Defines how lab content is built from source repositories into deployable containers.
+
+**Schema**:
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: BookbagBuild
+metadata:
+  name: openshift-fundamentals-lab
+  namespace: babylon-lab-ui
+spec:
+  # Source repository configuration
+  source:
+    git:
+      uri: "https://github.com/redhat-cop/babylon-labs"
+      ref: "main"
+      contextDir: "openshift-fundamentals"
+
+  # Build configuration
+  build:
+    strategy: Docker
+    dockerfile: "Dockerfile"
+    env:
+    - name: LAB_TYPE
+      value: "openshift-fundamentals"
+    - name: LAB_VERSION
+      value: "4.12"
+
+  # Output configuration
+  output:
+    to:
+      kind: ImageStreamTag
+      name: "openshift-fundamentals-lab:latest"
+
+  # Build triggers
+  triggers:
+  - type: ConfigChange
+  - type: GitHub
+    github:
+      secretReference:
+        name: github-webhook-secret
+  - type: Generic
+    generic:
+      secretReference:
+        name: generic-webhook-secret
+
+status:
+  # Build status
+  phase: Complete
+
+  # Build history
+  builds:
+  - name: openshift-fundamentals-lab-1
+    phase: Complete
+    startedAt: "2023-01-01T10:00:00Z"
+    completedAt: "2023-01-01T10:05:00Z"
+    output:
+      image: "image-registry.openshift-image-registry.svc:5000/babylon-lab-ui/openshift-fundamentals-lab:latest"
+
+  conditions:
+  - type: Ready
+    status: "True"
+    lastTransitionTime: "2023-01-01T10:05:00Z"
+    reason: BuildComplete
+    message: Lab content build completed successfully
+```
+
+=== BookbagDeployment
+
+Represents an individual lab interface deployment for a user or workshop session.
+
+**Schema**:
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: BookbagDeployment
+metadata:
+  name: openshift-fundamentals-user001
+  namespace: user-instructor-jane-20231215
+  labels:
+    babylon.gpte.redhat.com/workshop: openshift-fundamentals-dec2023
+    babylon.gpte.redhat.com/user: user001
+spec:
+  # Lab content reference
+  bookbagBuild:
+    name: openshift-fundamentals-lab
+    namespace: babylon-lab-ui
+
+  # User configuration
+  user:
+    username: "user001"
+    email: "user001@example.com"
+    guid: "user001"
+
+  # Lab environment variables
+  environment:
+    GUID: "user001"
+    CONSOLE_URL: "https://console-openshift-console.apps.cluster-user001.example.com"
+    API_URL: "https://api.cluster-user001.example.com:6443"
+    ADMIN_USERNAME: "admin"
+    ADMIN_PASSWORD: "admin-password-123"
+    USER_USERNAME: "user1"
+    USER_PASSWORD: "user-password-123"
+    BASTION_HOST: "bastion.cluster-user001.example.com"
+    STUDENT_PASSWORD: "student-password"
+
+  # Resource allocation
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # Ingress configuration
+  ingress:
+    enabled: true
+    host: "bookbag-user001.apps.babylon.example.com"
+    tls:
+      enabled: true
+      secretName: "babylon-tls-cert"
+
+  # Lifecycle configuration
+  lifespan:
+    end: "2023-12-15T18:00:00Z"
+    maximum: "12h"
+
+status:
+  # Deployment status
+  phase: Running
+
+  # Access information
+  access:
+    url: "https://bookbag-user001.apps.babylon.example.com"
+    ready: true
+
+  # Resource status
+  resources:
+    deployment:
+      name: bookbag-user001
+      ready: true
+      replicas: 1
+    service:
+      name: bookbag-user001
+      ready: true
+    ingress:
+      name: bookbag-user001
+      ready: true
+      hosts:
+      - "bookbag-user001.apps.babylon.example.com"
+
+  conditions:
+  - type: Ready
+    status: "True"
+    lastTransitionTime: "2023-12-15T09:15:00Z"
+    reason: DeploymentReady
+    message: Lab interface is ready and accessible
+```
+
+== Configuration
+
+=== Operator Configuration
+
+The Lab UI Manager Operator is configured through environment variables and ConfigMaps:
+
+**Environment Variables**:
+```yaml
+env:
+- name: LAB_UI_NAMESPACE
+  value: babylon-lab-ui
+- name: LAB_UI_DOMAIN
+  value: babylon.gpte.redhat.com
+- name: LAB_UI_LOG_LEVEL
+  value: INFO
+- name: LAB_UI_METRICS_PORT
+  value: "8080"
+- name: LAB_UI_DEFAULT_IMAGE
+  value: "quay.io/babylon/bookbag:latest"
+- name: LAB_UI_BUILD_IMAGE
+  value: "quay.io/openshift/origin-cli:latest"
+```
+
+**Helm Configuration**:
+```yaml
+labUIManager:
+  image:
+    repository: quay.io/babylon/lab-ui-manager
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+  # Default bookbag configuration
+  bookbag:
+    defaultImage: "quay.io/babylon/bookbag:latest"
+    defaultResources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+  # Build configuration
+  builds:
+    enabled: true
+    defaultBuilder: "quay.io/openshift/origin-cli:latest"
+    timeout: "10m"
+
+  # Ingress configuration
+  ingress:
+    domain: "apps.babylon.example.com"
+    tlsEnabled: true
+    defaultCertSecret: "babylon-tls-cert"
+```
+
+=== Lab Content Configuration
+
+**Bookbag Lab Structure**:
+```
+lab-content/
+├── Dockerfile
+├── workshop/
+│   ├── content/
+│   │   ├── 01_introduction.adoc
+│   │   ├── 02_setup.adoc
+│   │   ├── 03_exercises.adoc
+│   │   └── 99_conclusion.adoc
+│   ├── modules.yml
+│   └── antora.yml
+├── workshop-vars.yml
+└── build.yml
+```
+
+**Workshop Variables (workshop-vars.yml)**:
+```yaml
+# Workshop metadata
+workshop_name: "OpenShift Fundamentals"
+workshop_description: "Hands-on introduction to OpenShift"
+workshop_version: "4.12"
+
+# Lab environment variables
+lab_vars:
+  console_url: "{{ CONSOLE_URL | default('https://console.example.com') }}"
+  api_url: "{{ API_URL | default('https://api.example.com:6443') }}"
+  admin_username: "{{ ADMIN_USERNAME | default('admin') }}"
+  admin_password: "{{ ADMIN_PASSWORD | default('') }}"
+  user_username: "{{ USER_USERNAME | default('user1') }}"
+  user_password: "{{ USER_PASSWORD | default('') }}"
+
+# Workshop modules
+modules:
+- name: "introduction"
+  title: "Introduction to OpenShift"
+  duration: "15 minutes"
+- name: "setup"
+  title: "Environment Setup"
+  duration: "30 minutes"
+- name: "exercises"
+  title: "Hands-on Exercises"
+  duration: "120 minutes"
+```
+
+**Dockerfile Template**:
+```dockerfile
+FROM quay.io/babylon/bookbag:latest
+
+# Copy workshop content
+COPY workshop/ /opt/workshop/
+
+# Copy configuration
+COPY workshop-vars.yml /opt/workshop/vars.yml
+
+# Set workshop metadata
+ENV WORKSHOP_NAME="OpenShift Fundamentals"
+ENV WORKSHOP_DESCRIPTION="Hands-on introduction to OpenShift"
+
+# Expose workshop port
+EXPOSE 10080
+
+# Set working directory
+WORKDIR /opt/workshop
+
+# Start workshop
+CMD ["/opt/workshop/bin/start-workshop.sh"]
+```
+
+== Operations
+
+=== Managing BookbagBuilds
+
+**Create Lab Content Build**:
+```bash
+# Apply build configuration
+kubectl apply -f bookbag-build.yaml
+
+# Check build status
+kubectl get bookbagbuild openshift-fundamentals-lab -n babylon-lab-ui -o yaml
+
+# Monitor build progress
+kubectl get bookbagbuild openshift-fundamentals-lab -n babylon-lab-ui -w
+```
+
+**Trigger Manual Build**:
+```bash
+# Trigger new build
+kubectl patch bookbagbuild openshift-fundamentals-lab -n babylon-lab-ui --type='merge' \
+  -p='{"spec":{"triggers":[{"type":"ConfigChange"}]}}'
+
+# Check build logs
+oc logs buildconfig/openshift-fundamentals-lab -n babylon-lab-ui
+```
+
+**Update Lab Content**:
+```bash
+# Update source repository reference
+kubectl patch bookbagbuild openshift-fundamentals-lab -n babylon-lab-ui --type='merge' \
+  -p='{"spec":{"source":{"git":{"ref":"v1.2.0"}}}}'
+```
+
+=== Managing BookbagDeployments
+
+**Create Lab Interface**:
+```bash
+# Apply deployment configuration
+kubectl apply -f bookbag-deployment.yaml
+
+# Check deployment status
+kubectl get bookbagdeployment openshift-fundamentals-user001 -n user-instructor-jane-20231215 -o yaml
+
+# Monitor deployment readiness
+kubectl get bookbagdeployment openshift-fundamentals-user001 -n user-instructor-jane-20231215 -w
+```
+
+**Check Lab Access**:
+```bash
+# Get lab URL
+kubectl get bookbagdeployment openshift-fundamentals-user001 -n user-instructor-jane-20231215 \
+  -o jsonpath='{.status.access.url}'
+
+# Check lab readiness
+kubectl get bookbagdeployment openshift-fundamentals-user001 -n user-instructor-jane-20231215 \
+  -o jsonpath='{.status.access.ready}'
+```
+
+**Update Lab Environment**:
+```bash
+# Update environment variables
+kubectl patch bookbagdeployment openshift-fundamentals-user001 -n user-instructor-jane-20231215 --type='merge' \
+  -p='{"spec":{"environment":{"CONSOLE_URL":"https://new-console.example.com"}}}'
+```
+
+=== Bulk Operations
+
+**Deploy Labs for Workshop**:
+```bash
+# Create multiple lab deployments for workshop
+for i in {1..20}; do
+  user_id=$(printf "user%03d" $i)
+  cat <<EOF | kubectl apply -f -
+apiVersion: babylon.gpte.redhat.com/v1
+kind: BookbagDeployment
+metadata:
+  name: openshift-fundamentals-${user_id}
+  namespace: user-instructor-jane-20231215
+  labels:
+    babylon.gpte.redhat.com/workshop: openshift-fundamentals-dec2023
+    babylon.gpte.redhat.com/user: ${user_id}
+spec:
+  bookbagBuild:
+    name: openshift-fundamentals-lab
+    namespace: babylon-lab-ui
+  user:
+    username: "${user_id}"
+    email: "${user_id}@example.com"
+    guid: "${user_id}"
+  environment:
+    GUID: "${user_id}"
+    CONSOLE_URL: "https://console-openshift-console.apps.cluster-${user_id}.example.com"
+  ingress:
+    host: "bookbag-${user_id}.apps.babylon.example.com"
+EOF
+done
+```
+
+**Monitor Workshop Lab Status**:
+```bash
+# Check all lab deployments for workshop
+kubectl get bookbagdeployments -n user-instructor-jane-20231215 \
+  -l babylon.gpte.redhat.com/workshop=openshift-fundamentals-dec2023
+
+# Get lab URLs for all users
+kubectl get bookbagdeployments -n user-instructor-jane-20231215 \
+  -l babylon.gpte.redhat.com/workshop=openshift-fundamentals-dec2023 \
+  -o jsonpath='{.items[*].status.access.url}'
+```
+
+=== Troubleshooting
+
+**Check Operator Health**:
+```bash
+# Check operator deployment
+kubectl get deployment lab-ui-manager -n babylon-lab-ui
+
+# Check operator logs
+kubectl logs deployment/lab-ui-manager -n babylon-lab-ui
+
+# Check operator metrics
+kubectl port-forward deployment/lab-ui-manager -n babylon-lab-ui 8080:8080
+curl http://localhost:8080/metrics
+```
+
+**Debug Build Issues**:
+```bash
+# Check build configuration
+kubectl describe bookbagbuild openshift-fundamentals-lab -n babylon-lab-ui
+
+# Check build logs
+oc logs buildconfig/openshift-fundamentals-lab -n babylon-lab-ui
+
+# Check build pod logs
+kubectl logs $(kubectl get pods -n babylon-lab-ui -l buildconfig=openshift-fundamentals-lab -o name | head -1) -n babylon-lab-ui
+```
+
+**Debug Deployment Issues**:
+```bash
+# Check deployment events
+kubectl describe bookbagdeployment openshift-fundamentals-user001 -n user-instructor-jane-20231215
+
+# Check underlying deployment
+kubectl describe deployment bookbag-user001 -n user-instructor-jane-20231215
+
+# Check pod status
+kubectl get pods -n user-instructor-jane-20231215 -l app=bookbag-user001
+
+# Check pod logs
+kubectl logs -l app=bookbag-user001 -n user-instructor-jane-20231215
+```
+
+== Integration Patterns
+
+=== With Workshop Manager
+
+Workshop Manager creates BookbagDeployments for workshop participants:
+
+```yaml
+# Workshop Manager creates lab interfaces
+apiVersion: babylon.gpte.redhat.com/v1
+kind: BookbagDeployment
+metadata:
+  name: workshop-lab-user001
+  namespace: user-instructor-jane-20231215
+  ownerReferences:
+  - apiVersion: babylon.gpte.redhat.com/v1
+    kind: WorkshopUserAssignment
+    name: workshop-user-user001
+spec:
+  bookbagBuild:
+    name: openshift-fundamentals-lab
+    namespace: babylon-lab-ui
+  user:
+    username: "user001"
+    guid: "user001"
+  environment:
+    # Dynamically populated from resource claims
+    CONSOLE_URL: "{{ resourceClaim.status.resourceDetails.console_url }}"
+    API_URL: "{{ resourceClaim.status.resourceDetails.api_url }}"
+```
+
+=== With Resource Claims
+
+Lab environments integrate with provisioned infrastructure:
+
+```bash
+# Get resource details for lab environment
+CONSOLE_URL=$(kubectl get resourceclaim my-cluster -n user-instructor-jane-20231215 \
+  -o jsonpath='{.status.resourceDetails.console_url}')
+
+# Update lab deployment with resource details
+kubectl patch bookbagdeployment openshift-fundamentals-user001 -n user-instructor-jane-20231215 --type='merge' \
+  -p="{\"spec\":{\"environment\":{\"CONSOLE_URL\":\"$CONSOLE_URL\"}}}"
+```
+
+=== With Git Repositories
+
+Automatic lab content updates from Git:
+
+```yaml
+# BookbagBuild with Git webhook
+apiVersion: babylon.gpte.redhat.com/v1
+kind: BookbagBuild
+metadata:
+  name: openshift-fundamentals-lab
+  namespace: babylon-lab-ui
+spec:
+  source:
+    git:
+      uri: "https://github.com/redhat-cop/babylon-labs"
+      ref: "main"
+  triggers:
+  - type: GitHub
+    github:
+      secretReference:
+        name: github-webhook-secret
+```
+
+== Performance Tuning
+
+=== Build Optimization
+
+**Parallel Builds**:
+```yaml
+labUIManager:
+  builds:
+    maxConcurrentBuilds: 5
+    buildTimeout: "15m"
+
+    # Build resource limits
+    buildResources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+```
+
+**Image Layer Caching**:
+```dockerfile
+# Multi-stage build for efficient caching
+FROM node:16 AS builder
+COPY package*.json ./
+RUN npm ci --only=production
+
+FROM quay.io/babylon/bookbag:latest
+COPY --from=builder /node_modules ./node_modules
+COPY workshop/ /opt/workshop/
+```
+
+=== Deployment Optimization
+
+**Resource Right-Sizing**:
+```yaml
+# Resource allocation based on lab complexity
+spec:
+  resources:
+    # Light lab content
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+    # Heavy lab content with IDE
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+```
+
+**Horizontal Pod Autoscaling**:
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: bookbag-user001-hpa
+  namespace: user-instructor-jane-20231215
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: bookbag-user001
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 80
+```
+
+The Lab UI Manager Operator provides dynamic lab interface deployment capabilities, enabling scalable workshop delivery through containerized lab environments that integrate seamlessly with provisioned infrastructure and workshop management systems.

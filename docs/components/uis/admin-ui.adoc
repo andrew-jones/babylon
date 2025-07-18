@@ -1,0 +1,1021 @@
+= Admin UI
+
+== Overview
+
+The Admin UI is a comprehensive administrative interface designed for platform operators and administrators to manage, monitor, and troubleshoot the Babylon Platform. Built with React and TypeScript, it provides deep visibility into all platform components and resources, enabling efficient day-2 operations and administrative tasks.
+
+== Purpose and Responsibilities
+
+=== Primary Functions
+* **Resource Management**: Monitor and manage all Kubernetes resources across the platform
+* **Operator Administration**: Administer Anarchy, Poolboy, and other operator resources
+* **Workshop Management**: Oversee workshop provisioning, user assignments, and lifecycle
+* **Incident Management**: Track and respond to platform incidents and issues
+* **System Monitoring**: Real-time visibility into platform health and performance
+* **User Management**: Manage user access, permissions, and assignments
+
+=== Key Value Propositions
+* **Centralized Operations**: Single interface for all administrative tasks
+* **Deep Visibility**: Comprehensive view of all platform resources and their relationships
+* **Operational Efficiency**: Streamlined workflows for common administrative tasks
+* **Troubleshooting Tools**: Built-in tools for diagnosing and resolving issues
+
+== Architecture
+
+=== Component Structure
+
+```
+src/app/Admin/
+├── AdminInterface.tsx          # Main admin interface wrapper
+├── ResourceClaims.tsx          # ResourceClaim management
+├── ResourceHandles.tsx         # ResourceHandle monitoring
+├── ResourcePools.tsx           # ResourcePool administration
+├── ResourcePoolInstance.tsx    # Individual pool management
+├── ResourceProviders.tsx       # ResourceProvider configuration
+├── ResourceProviderInstance.tsx # Individual provider details
+├── Workshops.tsx               # Workshop administration
+├── WorkshopsScheduled.tsx      # Scheduled workshop management
+├── AnarchySubjects.tsx         # Anarchy resource management
+├── AnarchySubjectInstance.tsx  # Individual subject details
+├── AnarchyActions.tsx          # Anarchy action monitoring
+├── AnarchyActionInstance.tsx   # Action details and logs
+├── AnarchyRuns.tsx             # Anarchy run tracking
+├── AnarchyRunInstance.tsx      # Run execution details
+├── AnarchyGovernors.tsx        # Governor management
+├── AnarchyGovernorInstance.tsx # Governor configuration
+├── IncidentsPage.tsx           # Incident management interface
+├── RatingsPage.tsx             # User ratings and feedback
+├── CatalogItemAdmin.tsx        # Catalog administration
+├── admin.css                   # Admin-specific styling
+└── [various utility components] # Helper components and tables
+```
+
+=== Core Administrative Interfaces
+
+==== Resource Management Interface
+Comprehensive resource monitoring and management:
+
+```typescript
+const ResourceClaims: React.FC = () => {
+  const { namespace } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [selectedUids, setSelectedUids] = useState<string[]>([]);
+  const [modalState, setModalState] = useState<ModalState>({});
+
+  // Fetch resource claims with pagination
+  const {
+    data: resourceClaimsPages,
+    size,
+    setSize,
+    isLoading
+  } = useSWRInfinite<ResourceClaimList>(
+    (index, previousPageData) => {
+      if (previousPageData && !previousPageData.metadata?.continue) {
+        return null;
+      }
+      const continueId = index === 0 ? '' : previousPageData.metadata?.continue;
+      return apiPaths.RESOURCE_CLAIMS({
+        namespace,
+        limit: FETCH_BATCH_LIMIT,
+        continueId
+      });
+    },
+    fetcher,
+    {
+      refreshInterval: 8000,
+      revalidateFirstPage: true,
+      compare: compareK8sObjectsArr,
+    }
+  );
+
+  // Flatten paginated data
+  const resourceClaims = useMemo(() =>
+    resourceClaimsPages?.flatMap(page => page.items) || [],
+    [resourceClaimsPages]
+  );
+
+  // Filter and search functionality
+  const filteredResourceClaims = useMemo(() => {
+    const keywordFilter = searchParams.get('search')?.trim().split(/ +/) || [];
+
+    return resourceClaims.filter(resourceClaim => {
+      // Apply keyword search
+      if (keywordFilter.length > 0) {
+        const searchableText = [
+          resourceClaim.metadata.name,
+          resourceClaim.metadata.namespace,
+          resourceClaim.status?.resourceHandle?.name,
+        ].join(' ').toLowerCase();
+
+        return keywordFilter.every(keyword =>
+          searchableText.includes(keyword.toLowerCase())
+        );
+      }
+      return true;
+    });
+  }, [resourceClaims, searchParams]);
+
+  // Bulk operations
+  const handleBulkAction = async (action: string) => {
+    const selectedResources = resourceClaims.filter(rc =>
+      selectedUids.includes(rc.metadata.uid)
+    );
+
+    switch (action) {
+      case 'delete':
+        await Promise.all(
+          selectedResources.map(rc =>
+            deleteResourceClaim(rc.metadata.namespace, rc.metadata.name)
+          )
+        );
+        break;
+      case 'stop':
+        await Promise.all(
+          selectedResources.map(rc =>
+            stopAllResourcesInResourceClaim(rc.metadata.namespace, rc.metadata.name)
+          )
+        );
+        break;
+    }
+
+    setSelectedUids([]);
+    // Refresh data
+    mutate();
+  };
+
+  return (
+    <div className="admin-container">
+      <PageSection className="admin-header" variant={PageSectionVariants.light}>
+        <Split hasGutter>
+          <SplitItem isFilled>
+            <Title headingLevel="h4" size="xl">
+              ResourceClaims
+            </Title>
+          </SplitItem>
+          <SplitItem>
+            <ProjectSelector
+              currentNamespaceName={namespace}
+              onSelect={(n) => navigate(`/admin/resourceclaims/${n.name}`)}
+            />
+          </SplitItem>
+          <SplitItem>
+            <KeywordSearchInput
+              placeholder="Search resources..."
+              onSearch={(keywords) => {
+                if (keywords.length > 0) {
+                  searchParams.set('search', keywords.join(' '));
+                } else {
+                  searchParams.delete('search');
+                }
+                setSearchParams(searchParams);
+              }}
+            />
+          </SplitItem>
+        </Split>
+      </PageSection>
+
+      <PageSection className="admin-body" variant={PageSectionVariants.light}>
+        <SelectableTable
+          columns={['Name', 'Service Namespace', 'GUID', 'Status', 'Created At', 'Actions']}
+          onSelectAll={(isSelected: boolean) => {
+            setSelectedUids(isSelected ?
+              resourceClaims.map(rc => rc.metadata.uid) : []
+            );
+          }}
+          rows={filteredResourceClaims.map(resourceClaim => ({
+            cells: [
+              <ResourceClaimNameCell key="name" resourceClaim={resourceClaim} />,
+              <ResourceClaimNamespaceCell key="namespace" resourceClaim={resourceClaim} />,
+              <ResourceClaimGUIDCell key="guid" resourceClaim={resourceClaim} />,
+              <ResourceClaimStatusCell key="status" resourceClaim={resourceClaim} />,
+              <ResourceClaimTimestampCell key="timestamp" resourceClaim={resourceClaim} />,
+              <ResourceClaimActionsCell
+                key="actions"
+                resourceClaim={resourceClaim}
+                onAction={setModalState}
+              />,
+            ],
+            onSelect: (isSelected: boolean) => {
+              setSelectedUids(prev =>
+                isSelected
+                  ? [...prev, resourceClaim.metadata.uid]
+                  : prev.filter(uid => uid !== resourceClaim.metadata.uid)
+              );
+            },
+            selected: selectedUids.includes(resourceClaim.metadata.uid),
+          }))}
+        />
+      </PageSection>
+    </div>
+  );
+};
+```
+
+==== Anarchy Resource Management
+Specialized interface for Anarchy operator resources:
+
+```typescript
+const AnarchySubjects: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { namespace } = useParams();
+
+  // State filters specific to Anarchy resources
+  const stateFilter = searchParams.get('state');
+  const keywordFilter = searchParams.get('search')?.trim().split(/ +/) || [];
+
+  const {
+    data: anarchySubjectsPages,
+    mutate,
+    size,
+    setSize
+  } = useSWRInfinite<AnarchySubjectList>(
+    (index, previousPageData) => {
+      if (previousPageData && !previousPageData.metadata?.continue) {
+        return null;
+      }
+      const continueId = index === 0 ? '' : previousPageData.metadata?.continue;
+      return apiPaths.ANARCHY_SUBJECTS({
+        namespace,
+        limit: FETCH_BATCH_LIMIT,
+        continueId
+      });
+    },
+    fetcher,
+    {
+      refreshInterval: 8000,
+      compare: compareK8sObjectsArr,
+    }
+  );
+
+  const anarchySubjects = useMemo(() =>
+    anarchySubjectsPages?.flatMap(page => page.items) || [],
+    [anarchySubjectsPages]
+  );
+
+  // Advanced filtering for Anarchy resources
+  const filteredSubjects = useMemo(() => {
+    return anarchySubjects.filter(subject => {
+      // State filter
+      if (stateFilter && subject.spec.governor !== stateFilter) {
+        return false;
+      }
+
+      // Keyword search across multiple fields
+      if (keywordFilter.length > 0) {
+        const searchText = [
+          subject.metadata.name,
+          subject.metadata.namespace,
+          subject.spec.governor,
+          subject.status?.currentState || '',
+        ].join(' ').toLowerCase();
+
+        return keywordFilter.every(keyword =>
+          searchText.includes(keyword.toLowerCase())
+        );
+      }
+
+      return true;
+    });
+  }, [anarchySubjects, stateFilter, keywordFilter]);
+
+  return (
+    <div className="admin-container">
+      <PageSection className="admin-header" variant={PageSectionVariants.light}>
+        <Split hasGutter>
+          <SplitItem isFilled>
+            <Title headingLevel="h4" size="xl">
+              AnarchySubjects
+            </Title>
+          </SplitItem>
+          <SplitItem>
+            <AnarchySubjectStateSelect
+              state={stateFilter}
+              onSelect={(state) => {
+                if (state) {
+                  searchParams.set('state', state);
+                } else {
+                  searchParams.delete('state');
+                }
+                setSearchParams(searchParams);
+              }}
+            />
+          </SplitItem>
+          <SplitItem>
+            <ProjectSelector
+              selector="anarchy"
+              currentNamespaceName={namespace}
+              onSelect={(n) => {
+                navigate(`/admin/anarchysubjects/${n.name}${location.search}`);
+              }}
+            />
+          </SplitItem>
+        </Split>
+      </PageSection>
+
+      <PageSection className="admin-body" variant={PageSectionVariants.light}>
+        <AnarchySubjectsTable
+          anarchySubjects={filteredSubjects}
+          namespace={namespace}
+          onSelect={handleSubjectSelection}
+        />
+      </PageSection>
+    </div>
+  );
+};
+```
+
+==== Workshop Administration Interface
+Comprehensive workshop management for administrators:
+
+```typescript
+const Workshops: React.FC = () => {
+  const navigate = useNavigate();
+  const { namespace } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [selectedUids, setSelectedUids] = useState<string[]>([]);
+  const [modalState, setModalState] = useState<WorkshopModalState>({});
+
+  const {
+    data: workshopsPages,
+    mutate,
+    size,
+    setSize,
+  } = useSWRInfinite<WorkshopList>(
+    (index, previousPageData) => {
+      if (previousPageData && !previousPageData.metadata?.continue) {
+        return null;
+      }
+      const continueId = index === 0 ? '' : previousPageData.metadata?.continue;
+      return apiPaths.WORKSHOPS({ namespace, limit: FETCH_BATCH_LIMIT, continueId });
+    },
+    fetcher,
+    {
+      refreshInterval: 8000,
+      compare: compareK8sObjectsArr,
+    }
+  );
+
+  const workshops = useMemo(() =>
+    workshopsPages?.flatMap(page => page.items) || [],
+    [workshopsPages]
+  );
+
+  // Workshop-specific operations
+  const handleWorkshopAction = async (action: string, workshop?: Workshop) => {
+    switch (action) {
+      case 'delete':
+        if (workshop) {
+          await deleteWorkshop(workshop.metadata.namespace, workshop.metadata.name);
+        } else {
+          // Bulk delete
+          const selectedWorkshops = workshops.filter(w =>
+            selectedUids.includes(w.metadata.uid)
+          );
+          await Promise.all(
+            selectedWorkshops.map(w =>
+              deleteWorkshop(w.metadata.namespace, w.metadata.name)
+            )
+          );
+        }
+        break;
+      case 'start':
+        if (workshop) {
+          await startWorkshop(workshop.metadata.namespace, workshop.metadata.name);
+        }
+        break;
+      case 'stop':
+        if (workshop) {
+          await stopWorkshop(workshop.metadata.namespace, workshop.metadata.name);
+        }
+        break;
+    }
+
+    mutate();
+  };
+
+  return (
+    <div className="admin-container">
+      <Modal ref={modalAction} onConfirm={onModalAction}>
+        <WorkshopActionModal modalState={modalState} />
+      </Modal>
+
+      <PageSection className="admin-header" variant={PageSectionVariants.light}>
+        <Split hasGutter>
+          <SplitItem isFilled>
+            <Title headingLevel="h4" size="xl">
+              Workshops
+            </Title>
+          </SplitItem>
+          <SplitItem>
+            <WorkshopActions
+              isDisabled={selectedUids.length === 0}
+              workshopName="Selected"
+              actionHandlers={{
+                delete: () => handleWorkshopAction('delete'),
+                start: () => handleWorkshopAction('start'),
+                stop: () => handleWorkshopAction('stop'),
+              }}
+            />
+          </SplitItem>
+        </Split>
+      </PageSection>
+
+      <PageSection className="admin-body" variant={PageSectionVariants.light}>
+        <WorkshopsTable
+          workshops={workshops}
+          selectedUids={selectedUids}
+          onSelect={setSelectedUids}
+          onAction={handleWorkshopAction}
+        />
+      </PageSection>
+    </div>
+  );
+};
+```
+
+=== Advanced Monitoring and Diagnostics
+
+==== Resource Pool Health Monitoring
+Real-time monitoring of resource pool status and health:
+
+```typescript
+const ResourcePoolInstance: React.FC = () => {
+  const { name: resourcePoolName, tab: activeTab = 'details' } = useParams();
+
+  const { data: resourcePool, error } = useSWR(
+    resourcePoolName ? apiPaths.RESOURCE_POOL({ name: resourcePoolName }) : null,
+    fetcher,
+    { refreshInterval: 5000 }
+  );
+
+  const { data: resourceHandles } = useSWR(
+    resourcePoolName ?
+      apiPaths.RESOURCE_HANDLES({ resourcePool: resourcePoolName }) :
+      null,
+    fetcher,
+    { refreshInterval: 10000 }
+  );
+
+  // Calculate pool statistics
+  const poolStats = useMemo(() => {
+    if (!resourceHandles || !resourcePool) return null;
+
+    const total = resourceHandles.length;
+    const available = resourceHandles.filter(rh => !rh.spec.resourceClaim).length;
+    const claimed = total - available;
+    const minAvailable = resourcePool.spec.minAvailable || 0;
+    const healthy = available >= minAvailable;
+
+    return {
+      total,
+      available,
+      claimed,
+      minAvailable,
+      healthy,
+      utilizationPercent: total > 0 ? Math.round((claimed / total) * 100) : 0,
+    };
+  }, [resourceHandles, resourcePool]);
+
+  // Pool health indicators
+  const healthStatus = useMemo(() => {
+    if (!poolStats) return 'unknown';
+
+    if (!poolStats.healthy) return 'critical';
+    if (poolStats.available < poolStats.minAvailable * 1.5) return 'warning';
+    return 'healthy';
+  }, [poolStats]);
+
+  return (
+    <ErrorBoundaryPage name={resourcePoolName} type="ResourcePool">
+      <PageSection className="admin-header" variant={PageSectionVariants.light}>
+        <Breadcrumb>
+          <BreadcrumbItem to="/admin/resourcepools">ResourcePools</BreadcrumbItem>
+          <BreadcrumbItem isActive>{resourcePoolName}</BreadcrumbItem>
+        </Breadcrumb>
+
+        <Split hasGutter>
+          <SplitItem isFilled>
+            <Title headingLevel="h2" size="xl">
+              {resourcePoolName}
+            </Title>
+          </SplitItem>
+          <SplitItem>
+            <Label color={healthStatus === 'healthy' ? 'green' :
+                         healthStatus === 'warning' ? 'orange' : 'red'}>
+              {healthStatus.toUpperCase()}
+            </Label>
+          </SplitItem>
+        </Split>
+      </PageSection>
+
+      <PageSection className="admin-body" variant={PageSectionVariants.light}>
+        <Tabs
+          activeKey={activeTab}
+          onSelect={(e, tabIndex) =>
+            navigate(`/admin/resourcepools/${resourcePoolName}/${tabIndex}`)
+          }
+        >
+          <Tab eventKey="details" title={<TabTitleText>Details</TabTitleText>}>
+            <ResourcePoolDetailsTab
+              resourcePool={resourcePool}
+              poolStats={poolStats}
+            />
+          </Tab>
+
+          <Tab eventKey="handles" title={<TabTitleText>Resource Handles</TabTitleText>}>
+            <ResourceHandlesTab
+              resourceHandles={resourceHandles}
+              poolStats={poolStats}
+            />
+          </Tab>
+
+          <Tab eventKey="monitoring" title={<TabTitleText>Monitoring</TabTitleText>}>
+            <ResourcePoolMonitoringTab
+              resourcePoolName={resourcePoolName}
+              poolStats={poolStats}
+            />
+          </Tab>
+
+          <Tab eventKey="yaml" title={<TabTitleText>YAML</TabTitleText>}>
+            <Editor
+              height="500px"
+              language="yaml"
+              options={{ readOnly: true }}
+              theme="vs-dark"
+              value={yaml.dump(resourcePool)}
+            />
+          </Tab>
+        </Tabs>
+      </PageSection>
+    </ErrorBoundaryPage>
+  );
+};
+```
+
+==== Incident Management System
+Comprehensive incident tracking and resolution:
+
+```typescript
+const IncidentsPage: React.FC = () => {
+  const { incidents_enabled } = useInterfaceConfig();
+  const [activeIncidents, setActiveIncidents] = useState<Incident[]>([]);
+  const [incidentFilters, setIncidentFilters] = useState<IncidentFilters>({
+    severity: '',
+    status: '',
+    component: '',
+  });
+
+  const { data: incidents, mutate: refreshIncidents } = useSWR(
+    incidents_enabled ? '/api/admin/v1/incidents' : null,
+    fetcher,
+    { refreshInterval: 30000 }
+  );
+
+  const { data: catalogIncidents } = useSWR(
+    incidents_enabled ? '/api/admin/v1/catalog-incidents' : null,
+    fetcher,
+    { refreshInterval: 30000 }
+  );
+
+  // Filter and sort incidents
+  const filteredIncidents = useMemo(() => {
+    if (!incidents) return [];
+
+    return incidents
+      .filter(incident => {
+        if (incidentFilters.severity &&
+            incident.severity !== incidentFilters.severity) {
+          return false;
+        }
+        if (incidentFilters.status &&
+            incident.status !== incidentFilters.status) {
+          return false;
+        }
+        if (incidentFilters.component &&
+            !incident.component.includes(incidentFilters.component)) {
+          return false;
+        }
+        return true;
+      })
+      .sort((a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+  }, [incidents, incidentFilters]);
+
+  // Incident management actions
+  const handleIncidentAction = async (
+    action: IncidentAction,
+    incident: Incident
+  ) => {
+    switch (action) {
+      case 'acknowledge':
+        await acknowledgeIncident(incident.id);
+        break;
+      case 'resolve':
+        await resolveIncident(incident.id);
+        break;
+      case 'escalate':
+        await escalateIncident(incident.id);
+        break;
+    }
+
+    refreshIncidents();
+  };
+
+  if (!incidents_enabled) {
+    return <UnexpectedError message="Incidents module is not enabled" />;
+  }
+
+  return (
+    <div className="admin-container">
+      <PageSection className="admin-header" variant={PageSectionVariants.light}>
+        <Split hasGutter>
+          <SplitItem isFilled>
+            <Title headingLevel="h4" size="xl">
+              Incidents
+            </Title>
+          </SplitItem>
+          <SplitItem>
+            <IncidentFilters
+              filters={incidentFilters}
+              onFiltersChange={setIncidentFilters}
+            />
+          </SplitItem>
+        </Split>
+      </PageSection>
+
+      <PageSection variant={PageSectionVariants.light}>
+        <Card>
+          <CardHeader>
+            <Title headingLevel="h3">Platform Incidents</Title>
+          </CardHeader>
+          <CardBody>
+            <IncidentsAlertList
+              incidents={filteredIncidents}
+              onAction={handleIncidentAction}
+            />
+          </CardBody>
+        </Card>
+      </PageSection>
+
+      <PageSection variant={PageSectionVariants.light}>
+        <Card>
+          <CardHeader>
+            <Title headingLevel="h3">Catalog Item Incidents</Title>
+          </CardHeader>
+          <CardBody>
+            <CatalogIncidentsAlertList
+              incidents={catalogIncidents}
+              onAction={handleIncidentAction}
+            />
+          </CardBody>
+        </Card>
+      </PageSection>
+    </div>
+  );
+};
+```
+
+=== Data Visualization and Analytics
+
+==== Resource Utilization Dashboard
+Visual representation of platform resource usage:
+
+```typescript
+const ResourceUtilizationDashboard: React.FC = () => {
+  const { data: utilizationData } = useSWR(
+    '/api/admin/v1/utilization',
+    fetcher,
+    { refreshInterval: 60000 }
+  );
+
+  // Transform data for visualization
+  const chartData = useMemo(() => {
+    if (!utilizationData) return null;
+
+    return {
+      resourcePools: utilizationData.resourcePools.map(pool => ({
+        name: pool.name,
+        total: pool.totalResources,
+        available: pool.availableResources,
+        utilized: pool.totalResources - pool.availableResources,
+        utilizationPercent: Math.round(
+          ((pool.totalResources - pool.availableResources) / pool.totalResources) * 100
+        ),
+      })),
+      timeSeriesData: utilizationData.timeSeries,
+    };
+  }, [utilizationData]);
+
+  return (
+    <Stack hasGutter>
+      <StackItem>
+        <Card>
+          <CardHeader>
+            <Title headingLevel="h3">Resource Pool Utilization</Title>
+          </CardHeader>
+          <CardBody>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={chartData?.resourcePools}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="name" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="available" stackId="a" fill="#3e8635" name="Available" />
+                <Bar dataKey="utilized" stackId="a" fill="#c9190b" name="Utilized" />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardBody>
+        </Card>
+      </StackItem>
+
+      <StackItem>
+        <Card>
+          <CardHeader>
+            <Title headingLevel="h3">Utilization Trends</Title>
+          </CardHeader>
+          <CardBody>
+            <ResponsiveContainer width="100%" height={400}>
+              <LineChart data={chartData?.timeSeriesData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="timestamp" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Line type="monotone" dataKey="utilizationPercent" stroke="#0066cc" />
+              </LineChart>
+            </ResponsiveContainer>
+          </CardBody>
+        </Card>
+      </StackItem>
+    </Stack>
+  );
+};
+```
+
+=== Security and Access Control
+
+==== RBAC Management Interface
+Administrative interface for managing role-based access control:
+
+```typescript
+const RBACManagement: React.FC = () => {
+  const [selectedNamespace, setSelectedNamespace] = useState<string>('');
+  const { data: namespaces } = useSWR('/api/admin/v1/namespaces', fetcher);
+  const { data: roleBindings } = useSWR(
+    selectedNamespace ?
+      `/api/admin/v1/namespaces/${selectedNamespace}/rolebindings` :
+      null,
+    fetcher
+  );
+
+  const handlePermissionUpdate = async (
+    user: string,
+    role: string,
+    namespace: string,
+    action: 'grant' | 'revoke'
+  ) => {
+    const endpoint = `/api/admin/v1/namespaces/${namespace}/rolebindings`;
+
+    if (action === 'grant') {
+      await apiFetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user,
+          role,
+          namespace,
+        }),
+      });
+    } else {
+      await apiFetch(`${endpoint}/${user}/${role}`, {
+        method: 'DELETE',
+      });
+    }
+
+    // Refresh data
+    mutate();
+  };
+
+  return (
+    <Stack hasGutter>
+      <StackItem>
+        <Card>
+          <CardHeader>
+            <Title headingLevel="h3">Role-Based Access Control</Title>
+          </CardHeader>
+          <CardBody>
+            <Form>
+              <FormGroup label="Namespace" fieldId="namespace-select">
+                <Select
+                  selections={selectedNamespace}
+                  onSelect={(event, selection) =>
+                    setSelectedNamespace(selection as string)
+                  }
+                  placeholderText="Select namespace..."
+                >
+                  {namespaces?.map(ns => (
+                    <SelectOption key={ns.name} value={ns.name}>
+                      {ns.name}
+                    </SelectOption>
+                  ))}
+                </Select>
+              </FormGroup>
+            </Form>
+          </CardBody>
+        </Card>
+      </StackItem>
+
+      {selectedNamespace && (
+        <StackItem>
+          <Card>
+            <CardHeader>
+              <Title headingLevel="h4">
+                Permissions for {selectedNamespace}
+              </Title>
+            </CardHeader>
+            <CardBody>
+              <RoleBindingsTable
+                roleBindings={roleBindings}
+                namespace={selectedNamespace}
+                onPermissionUpdate={handlePermissionUpdate}
+              />
+            </CardBody>
+          </Card>
+        </StackItem>
+      )}
+    </Stack>
+  );
+};
+```
+
+=== Performance and Scalability
+
+==== Efficient Data Loading
+Optimized data loading with pagination and virtual scrolling:
+
+```typescript
+// Custom hook for infinite scrolling with virtual rendering
+const useVirtualizedInfiniteScroll = <T>(
+  fetchFunction: (page: number, pageSize: number) => Promise<T[]>,
+  pageSize: number = 50
+) => {
+  const [data, setData] = useState<T[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [page, setPage] = useState(0);
+
+  const loadMore = useCallback(async () => {
+    if (loading || !hasMore) return;
+
+    setLoading(true);
+    try {
+      const newItems = await fetchFunction(page, pageSize);
+
+      if (newItems.length < pageSize) {
+        setHasMore(false);
+      }
+
+      setData(prev => [...prev, ...newItems]);
+      setPage(prev => prev + 1);
+    } catch (error) {
+      console.error('Failed to load more data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [fetchFunction, page, pageSize, loading, hasMore]);
+
+  // Load initial data
+  useEffect(() => {
+    loadMore();
+  }, []);
+
+  return {
+    data,
+    loading,
+    hasMore,
+    loadMore,
+  };
+};
+
+// Usage in admin tables
+const VirtualizedAdminTable: React.FC<{ resources: Resource[] }> = ({
+  resources
+}) => {
+  const {
+    data: virtualizedData,
+    loadMore,
+    hasMore,
+  } = useVirtualizedInfiniteScroll(fetchResources, 100);
+
+  return (
+    <InfiniteLoader
+      isItemLoaded={(index) => !!virtualizedData[index]}
+      itemCount={hasMore ? virtualizedData.length + 1 : virtualizedData.length}
+      loadMoreItems={loadMore}
+    >
+      {({ onItemsRendered, ref }) => (
+        <FixedSizeList
+          ref={ref}
+          height={600}
+          itemCount={virtualizedData.length}
+          itemSize={60}
+          onItemsRendered={onItemsRendered}
+        >
+          {({ index, style }) => (
+            <div style={style}>
+              <AdminTableRow resource={virtualizedData[index]} />
+            </div>
+          )}
+        </FixedSizeList>
+      )}
+    </InfiniteLoader>
+  );
+};
+```
+
+=== Integration and Extensibility
+
+==== Plugin Architecture
+Extensible plugin system for custom administrative functionality:
+
+```typescript
+// Plugin interface definition
+interface AdminPlugin {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  component: React.ComponentType<AdminPluginProps>;
+  permissions: string[];
+  routes: AdminPluginRoute[];
+}
+
+interface AdminPluginProps {
+  namespace?: string;
+  resourceType?: string;
+  onNavigation: (path: string) => void;
+}
+
+// Plugin registry
+class AdminPluginRegistry {
+  private plugins: Map<string, AdminPlugin> = new Map();
+
+  register(plugin: AdminPlugin) {
+    this.plugins.set(plugin.id, plugin);
+  }
+
+  getPlugin(id: string): AdminPlugin | undefined {
+    return this.plugins.get(id);
+  }
+
+  getAllPlugins(): AdminPlugin[] {
+    return Array.from(this.plugins.values());
+  }
+
+  getPluginsForRoute(route: string): AdminPlugin[] {
+    return this.getAllPlugins().filter(plugin =>
+      plugin.routes.some(r => r.path === route)
+    );
+  }
+}
+
+// Plugin integration in admin interface
+const AdminInterface: React.FC = () => {
+  const { plugins } = useAdminPlugins();
+  const { user } = useSession();
+
+  const availablePlugins = useMemo(() =>
+    plugins.filter(plugin =>
+      plugin.permissions.some(permission =>
+        user.permissions.includes(permission)
+      )
+    ),
+    [plugins, user.permissions]
+  );
+
+  return (
+    <AppLayout>
+      <Routes>
+        {/* Core admin routes */}
+        <Route path="/admin/resourceclaims" element={<ResourceClaims />} />
+        <Route path="/admin/workshops" element={<Workshops />} />
+
+        {/* Plugin routes */}
+        {availablePlugins.map(plugin =>
+          plugin.routes.map(route => (
+            <Route
+              key={`${plugin.id}-${route.path}`}
+              path={route.path}
+              element={<plugin.component {...route.props} />}
+            />
+          ))
+        )}
+      </Routes>
+    </AppLayout>
+  );
+};
+```
+
+The Admin UI provides platform operators with comprehensive visibility and control over all aspects of the Babylon Platform, enabling efficient administration, monitoring, and troubleshooting through a modern, scalable interface built on enterprise-grade patterns and technologies.

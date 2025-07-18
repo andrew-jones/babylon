@@ -1,0 +1,640 @@
+= Deployment Guide
+
+== Overview
+
+This guide provides comprehensive instructions for deploying the Babylon Platform in enterprise environments. The deployment process is designed to be straightforward while providing flexibility for different operational requirements and infrastructure configurations.
+
+== Deployment Architecture
+
+The Babylon Platform follows a modular deployment architecture that allows for both complete installations and selective component deployment based on organizational needs.
+
+=== Core Infrastructure Requirements
+
+[source,mermaid]
+----
+graph TB
+    subgraph "Infrastructure Layer"
+        OCP[OpenShift/Kubernetes Cluster]
+        Storage[Persistent Storage]
+        Network[Network Infrastructure]
+        DNS[DNS Services]
+    end
+
+    subgraph "External Dependencies"
+        Tower[Ansible Tower/AAP]
+        AWS[Cloud Provider APIs]
+        Git[Git Repositories]
+        LDAP[Identity Provider]
+        SMTP[Email Services]
+        DB[Database Services]
+    end
+
+    subgraph "Babylon Platform"
+        Operators[Core Operators]
+        APIs[REST APIs]
+        UIs[User Interfaces]
+        Storage2[Data Storage]
+    end
+
+    OCP --> Operators
+    Storage --> Storage2
+    Network --> APIs
+    DNS --> UIs
+
+    Operators --> Tower
+    Operators --> AWS
+    Operators --> Git
+    APIs --> LDAP
+    APIs --> DB
+    UIs --> SMTP
+----
+
+=== Deployment Patterns
+
+==== Single Cluster Deployment
+Complete platform deployment on a single OpenShift cluster:
+
+* **Use Case**: Development, testing, small-scale production
+* **Resource Requirements**: Moderate (16-32 vCPU, 64-128 GB RAM)
+* **Complexity**: Low
+* **High Availability**: Limited to cluster-level HA
+
+==== Multi-Cluster Deployment
+Distributed deployment across multiple clusters:
+
+* **Use Case**: Large-scale production, geographic distribution
+* **Resource Requirements**: High (varies by scale)
+* **Complexity**: High
+* **High Availability**: Cross-cluster redundancy
+
+==== Selective Component Deployment
+Deploy only specific platform components:
+
+* **Use Case**: Integration with existing systems
+* **Resource Requirements**: Variable
+* **Complexity**: Medium
+* **High Availability**: Component-specific
+
+== Prerequisites
+
+=== Infrastructure Requirements
+
+==== OpenShift/Kubernetes Cluster
+* **Version**: OpenShift 4.10+ or Kubernetes 1.23+
+* **Node Configuration**:
+  - Master nodes: 3 nodes, 4 vCPU, 16 GB RAM each
+  - Worker nodes: 4+ nodes, 8 vCPU, 32 GB RAM each
+* **Storage**:
+  - Dynamic storage provisioning (RWO and RWX)
+  - Minimum 500 GB available storage
+* **Network**:
+  - Pod networking (CNI)
+  - Service networking
+  - Ingress controller
+
+==== Required OpenShift Features
+```bash
+# Verify cluster capabilities
+oc get infrastructure cluster -o yaml | grep platformType
+oc get storageclass
+oc get ingresscontroller -n openshift-ingress-operator
+```
+
+=== External System Dependencies
+
+==== Ansible Automation Platform
+* **Version**: AAP 2.x or Ansible Tower 3.8+
+* **Configuration**:
+  - API access enabled
+  - Execution environments configured
+  - Credentials management setup
+* **Connectivity**: Network access from OpenShift cluster
+* **Authentication**: Service account with job execution permissions
+
+==== Cloud Provider Access
+* **AWS**:
+  - IAM user with EC2, VPC, Route53 permissions
+  - Cost Explorer API access (for cost tracking)
+  - Service quotas sufficient for expected workload
+* **Azure/GCP**: Similar permissions as AWS (if using multi-cloud)
+
+==== Git Repository Access
+* **Private Repositories**: SSH key access configured
+* **GitHub Integration**: Personal access token with repo permissions
+* **Repository Structure**: AgnosticV-compatible repository organization
+
+==== Identity Provider
+* **LDAP/Active Directory**:
+  - Service account for directory queries
+  - User group information available
+* **OIDC Provider**:
+  - Client credentials configured
+  - Appropriate scopes and claims
+
+==== Email Services
+* **SMTP Server**:
+  - Authentication credentials
+  - TLS/SSL support recommended
+  - Relay permissions for notification sending
+
+=== Network and Security Requirements
+
+==== Network Access
+```bash
+# Required outbound connections from cluster
+# Git repositories (SSH/HTTPS)
+github.com:22/443
+gitlab.com:22/443
+
+# Container registries
+quay.io:443
+registry.redhat.io:443
+
+# Cloud provider APIs
+amazonaws.com:443
+azure.com:443
+googleapis.com:443
+
+# Ansible Tower/AAP
+your-tower.example.com:443
+
+# SMTP services
+smtp.example.com:587/465
+```
+
+==== Security Considerations
+* TLS certificates for external endpoints
+* Network policies for pod-to-pod communication
+* RBAC configuration aligned with organizational structure
+* Secrets management for external system credentials
+
+== Installation Process
+
+=== Phase 1: Cluster Preparation
+
+==== Create Required Namespaces
+```bash
+# Core platform namespaces
+oc create namespace babylon-config
+oc create namespace babylon-anarchy
+oc create namespace poolboy
+
+# Interface namespaces (per environment)
+oc create namespace babylon-catalog-rhpds
+oc create namespace babylon-catalog-partners
+
+# Operations namespaces
+oc create namespace babylon-admin
+oc create namespace babylon-ratings
+oc create namespace babylon-notifier
+oc create namespace babylon-workshop-manager
+oc create namespace babylon-cost-tracker
+oc create namespace babylon-lab-ui-manager
+```
+
+==== Configure Storage Classes
+```yaml
+# Example: Configure default storage class
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: babylon-storage
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: kubernetes.io/aws-ebs
+parameters:
+  type: gp3
+  fsType: ext4
+allowVolumeExpansion: true
+```
+
+==== Set Up Network Policies
+```bash
+# Apply default network policies
+oc apply -f deploy/network-policies/
+```
+
+=== Phase 2: External System Setup
+
+==== Configure Ansible Tower/AAP Integration
+```bash
+# Create Tower credentials secret
+oc create secret generic babylon-tower \
+  --from-literal=hostname=tower.example.com \
+  --from-literal=user=babylon-service \
+  --from-literal=password='secure-password' \
+  -n anarchy-operator
+
+# Create AWS credentials secret
+oc create secret generic aws-credentials \
+  --from-literal=aws_access_key_id=AKIAIOSFODNN7EXAMPLE \
+  --from-literal=aws_secret_access_key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY \
+  -n anarchy-operator
+```
+
+==== Set Up Git Repository Access
+```bash
+# Create SSH key for private repository access
+ssh-keygen -t rsa -b 4096 -f agnosticv-key -N ""
+
+# Create secret with SSH key
+oc create secret generic agnosticv-ssh-key \
+  --from-file=ssh-privatekey=agnosticv-key \
+  --type=kubernetes.io/ssh-auth \
+  -n babylon-config
+
+# Configure GitHub integration (if needed)
+oc create secret generic github-token \
+  --from-literal=token=ghp_xxxxxxxxxxxxxxxxxxxx \
+  -n babylon-config
+```
+
+==== Database Setup
+```bash
+# For development: Use in-cluster PostgreSQL
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm install postgres bitnami/postgresql \
+  --namespace babylon-admin \
+  --set auth.postgresPassword=secure-password \
+  --set primary.persistence.size=50Gi
+
+# For production: Use external managed database
+oc create secret generic database \
+  --from-literal=hostname=postgres.example.com \
+  --from-literal=username=babylon \
+  --from-literal=password=secure-password \
+  --from-literal=database=babylon_admin \
+  -n babylon-admin
+```
+
+=== Phase 3: Core Platform Deployment
+
+==== Install Helm Chart Repository
+```bash
+# Add Babylon Helm repository (if available)
+helm repo add babylon https://redhat-cop.github.io/babylon
+helm repo update
+
+# Or use local charts
+git clone https://github.com/redhat-cop/babylon.git
+cd babylon
+```
+
+==== Configure Deployment Values
+Create environment-specific values file:
+
+```yaml
+# values-production.yaml
+ingressDomain: babylon.example.com
+
+agnosticv:
+  deploy: true
+  repositories:
+    gpte-agnosticv:
+      url: git@github.com:example/agnosticv.git
+      sshKey: agnosticv-ssh-key
+      gitHub:
+        token: github-token
+
+anarchy:
+  namespaces:
+  - name: babylon-anarchy
+    profile: production
+
+catalog:
+  interfaces:
+    babylon-catalog-rhpds:
+      route:
+        host: catalog.babylon.example.com
+    babylon-catalog-partners:
+      route:
+        host: partners.babylon.example.com
+
+admin:
+  deploy: true
+  db:
+    secretName: database
+
+ratings:
+  deploy: true
+  db:
+    secretName: ratings-db
+
+notifier:
+  deploy: true
+  smtp:
+    host: smtp.example.com
+    port: 587
+    username: noreply@example.com
+    password: smtp-password
+
+workshopManager:
+  deploy: true
+
+costTracker:
+  deploy: true
+  aws:
+    secretName: aws-credentials
+```
+
+==== Deploy Core Platform
+```bash
+# Install external dependencies first
+helm install anarchy https://github.com/redhat-cop/anarchy/releases/download/v0.16.1/anarchy-0.16.1.tgz \
+  --namespace anarchy-operator \
+  --create-namespace
+
+helm install poolboy https://github.com/redhat-cop/poolboy/releases/download/v1.8.1/poolboy-1.8.1.tgz \
+  --namespace poolboy \
+  --create-namespace
+
+# Deploy Babylon platform
+helm install babylon ./helm \
+  --namespace babylon-config \
+  --values values-production.yaml \
+  --timeout 30m
+```
+
+=== Phase 4: Post-Installation Configuration
+
+==== Verify Deployment Status
+```bash
+# Check all deployments
+oc get deployments -A | grep babylon
+
+# Check custom resources
+oc get agnosticvrepos -n babylon-config
+oc get catalogitems -A
+oc get resourceproviders -n poolboy
+
+# Check operator logs
+oc logs -l app.kubernetes.io/name=babylon-agnosticv-operator -n babylon-config
+```
+
+==== Configure Initial Catalog
+```bash
+# Wait for AgnosticV repo synchronization
+oc wait --for=condition=Ready agnosticvrepo/gpte-agnosticv -n babylon-config --timeout=300s
+
+# Verify catalog items are created
+oc get catalogitems -A --no-headers | wc -l
+```
+
+==== Set Up Monitoring
+```bash
+# Install monitoring components (if not already present)
+oc apply -f deploy/monitoring/
+
+# Verify metrics endpoints
+curl -k https://catalog.babylon.example.com/metrics
+```
+
+== Environment-Specific Configurations
+
+=== Development Environment
+Simplified configuration for development and testing:
+
+```yaml
+# values-development.yaml
+ingressDomain: babylon-dev.example.com
+
+agnosticv:
+  repositories:
+    test-repo:
+      url: https://github.com/example/test-agnosticv.git
+      ref: development
+
+catalog:
+  interfaces:
+    babylon-catalog-dev: {}
+
+admin:
+  deploy: true
+  db:
+    deploy: true  # Use in-cluster database
+
+ratings:
+  deploy: false  # Disable for development
+
+notifier:
+  deploy: false  # Disable for development
+```
+
+=== Staging Environment
+Production-like configuration for testing:
+
+```yaml
+# values-staging.yaml
+ingressDomain: babylon-staging.example.com
+
+agnosticv:
+  repositories:
+    staging-repo:
+      url: git@github.com:example/agnosticv.git
+      ref: staging
+
+# Production-like resource limits
+workshopManager:
+  resources:
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+# Limited scaling for cost control
+anarchy:
+  namespaceProfiles:
+    default:
+      maxReplicas: 5
+```
+
+=== Production Environment
+Full production configuration:
+
+```yaml
+# values-production.yaml
+ingressDomain: babylon.example.com
+
+# High availability configuration
+agnosticv:
+  operator:
+    replicaCount: 2
+
+# Production resource limits
+workshopManager:
+  resources:
+    limits:
+      cpu: "4"
+      memory: 4Gi
+    requests:
+      cpu: "2"
+      memory: 2Gi
+
+# Backup configuration
+backup:
+  enabled: true
+  schedule: "0 2 * * *"
+  retention: "30d"
+```
+
+== Validation and Testing
+
+=== Functional Testing
+
+==== Basic Platform Functionality
+```bash
+# Test catalog access
+curl -k https://catalog.babylon.example.com/api/catalog/v1/catalogitems
+
+# Test workshop creation
+oc apply -f examples/workshop-test.yaml
+
+# Test resource provisioning
+oc apply -f examples/resourceclaim-test.yaml
+```
+
+==== Integration Testing
+```bash
+# Run integration test suite
+ansible-playbook test/integration/playbook.yaml \
+  -e cluster_url=$(oc whoami --show-server) \
+  -e cluster_token=$(oc whoami -t)
+```
+
+=== Performance Testing
+
+==== Load Testing
+```bash
+# Install load testing tools
+helm install k6 grafana/k6-operator
+
+# Run catalog API load test
+kubectl apply -f test/load/catalog-api-test.yaml
+```
+
+==== Scale Testing
+```bash
+# Test workshop scaling
+oc apply -f test/scale/large-workshop.yaml
+
+# Monitor resource usage
+oc top nodes
+oc top pods -A
+```
+
+=== Security Validation
+
+==== RBAC Testing
+```bash
+# Test user permissions
+oc auth can-i create resourceclaims --as=user@example.com
+oc auth can-i delete catalogitems --as=user@example.com
+```
+
+==== Network Policy Testing
+```bash
+# Test network isolation
+kubectl run test-pod --image=busybox --rm -it -- sh
+# Try to access restricted services
+```
+
+== Troubleshooting Common Issues
+
+=== Deployment Failures
+
+==== Insufficient Resources
+```bash
+# Check resource availability
+oc describe node | grep -A 5 "Allocated resources"
+oc get events --sort-by=.metadata.creationTimestamp
+```
+
+==== Image Pull Failures
+```bash
+# Check image pull secrets
+oc get secrets | grep docker
+oc describe pod <failing-pod> | grep -A 10 "Events:"
+```
+
+=== Configuration Issues
+
+==== Secret Management
+```bash
+# Verify secret contents
+oc get secret babylon-tower -o yaml
+echo "<base64-value>" | base64 -d
+```
+
+==== Network Connectivity
+```bash
+# Test external connectivity
+oc run network-test --image=busybox --rm -it -- sh
+# Test DNS resolution and external service access
+```
+
+=== Operator Issues
+
+==== AgnosticV Sync Failures
+```bash
+# Check repository access
+oc logs deployment/babylon-agnosticv-operator -n babylon-config
+oc get agnosticvrepos -o yaml
+```
+
+==== Resource Provisioning Failures
+```bash
+# Check Anarchy subjects
+oc get anarchysubjects -A
+oc describe anarchysubject <subject-name>
+
+# Check Tower job status
+# Access Tower UI to verify job execution
+```
+
+== Next Steps
+
+After successful deployment:
+
+1. **Configure User Access**: link:../user-guides/administrators.adoc[Set up user authentication and permissions]
+2. **Create Initial Catalogs**: link:../user-guides/instructors.adoc[Add catalog items and workshops]
+3. **Set Up Monitoring**: link:../operations/monitoring.adoc[Configure observability and alerting]
+4. **Plan Operations**: link:../operations/README.adoc[Establish operational procedures]
+
+== Advanced Deployment Options
+
+=== GitOps Deployment
+For GitOps-based deployments using ArgoCD or Flux:
+
+```yaml
+# argocd-application.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: babylon-platform
+spec:
+  source:
+    repoURL: https://github.com/redhat-cop/babylon
+    path: helm
+    helm:
+      valueFiles:
+      - values-production.yaml
+  destination:
+    namespace: babylon-config
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+```
+
+=== Disaster Recovery Setup
+Configure cross-cluster backup and recovery:
+
+```bash
+# Install backup operator
+oc apply -f deploy/backup/
+
+# Configure backup schedule
+oc apply -f examples/backup-config.yaml
+```
+
+This comprehensive deployment guide ensures successful installation and configuration of the Babylon Platform in enterprise environments while providing flexibility for different operational requirements.

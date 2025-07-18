@@ -1,0 +1,919 @@
+= Poolboy API
+
+== Overview
+
+The Poolboy API is a Kubernetes API extension that manages resource lifecycle, pooling, and provisioning through Custom Resource Definitions (CRDs). It provides resource pooling capabilities, lifecycle management, and integration with external provisioning systems through the Kubernetes API server.
+
+== API Base URL
+
+Poolboy extends the Kubernetes API server with custom resources:
+
+```
+https://api.cluster.example.com/apis/poolboy.gpte.redhat.com/v1
+```
+
+== Authentication
+
+Poolboy API uses standard Kubernetes authentication (service accounts, RBAC, and bearer tokens):
+
+```bash
+# Using kubectl
+kubectl get resourceclaims -n user-namespace
+
+# Using direct API calls
+curl -H "Authorization: Bearer $K8S_TOKEN" \
+  https://api.cluster.example.com/apis/poolboy.gpte.redhat.com/v1/namespaces/user-namespace/resourceclaims
+```
+
+== Resource Claims
+
+=== List Resource Claims
+
+==== Get Resource Claims in Namespace
+Retrieve resource claims for a specific namespace.
+
+```http
+GET /apis/poolboy.gpte.redhat.com/v1/namespaces/{namespace}/resourceclaims
+```
+
+**Query Parameters**:
+* `labelSelector` (string): Kubernetes label selector for filtering
+* `fieldSelector` (string): Field selector for filtering
+* `limit` (integer): Maximum number of items to return
+* `continue` (string): Continuation token for pagination
+* `watch` (boolean): Watch for changes
+
+**Example Request**:
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://api.cluster.example.com/apis/poolboy.gpte.redhat.com/v1/namespaces/user-johndoe/resourceclaims?labelSelector=babylon.gpte.redhat.com/catalogItem=openshift-workshop"
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "poolboy.gpte.redhat.com/v1",
+  "kind": "ResourceClaimList",
+  "metadata": {
+    "continue": "eyJ2IjoibWV0YS5rOHMuaW8vdjEi...",
+    "resourceVersion": "12345"
+  },
+  "items": [
+    {
+      "apiVersion": "poolboy.gpte.redhat.com/v1",
+      "kind": "ResourceClaim",
+      "metadata": {
+        "name": "openshift-workshop-abc123",
+        "namespace": "user-johndoe",
+        "uid": "550e8400-e29b-41d4-a716-446655440000",
+        "creationTimestamp": "2023-01-01T10:00:00Z",
+        "generation": 1,
+        "resourceVersion": "12340",
+        "labels": {
+          "babylon.gpte.redhat.com/catalogItem": "openshift-workshop",
+          "babylon.gpte.redhat.com/user": "johndoe"
+        },
+        "annotations": {
+          "babylon.gpte.redhat.com/displayName": "OpenShift Workshop",
+          "babylon.gpte.redhat.com/description": "Hands-on OpenShift workshop environment"
+        }
+      },
+      "spec": {
+        "resources": [
+          {
+            "provider": {
+              "name": "babylon",
+              "namespace": "poolboy"
+            },
+            "template": {
+              "apiVersion": "babylon.gpte.redhat.com/v1",
+              "kind": "CatalogItem",
+              "metadata": {
+                "name": "openshift-workshop",
+                "namespace": "babylon-catalog"
+              },
+              "spec": {
+                "parameters": {
+                  "user_count": 1,
+                  "aws_region": "us-east-1",
+                  "openshift_version": "4.12"
+                }
+              }
+            }
+          }
+        ],
+        "lifespan": {
+          "end": "2023-01-01T18:00:00Z",
+          "relativeMaximum": "8h"
+        }
+      },
+      "status": {
+        "phase": "Ready",
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "lastTransitionTime": "2023-01-01T10:15:00Z",
+            "reason": "ProvisionComplete",
+            "message": "All resources have been successfully provisioned"
+          }
+        ],
+        "resources": [
+          {
+            "name": "babylon-openshift-cluster",
+            "state": "Ready",
+            "provider": {
+              "name": "babylon",
+              "namespace": "poolboy"
+            },
+            "reference": {
+              "apiVersion": "anarchy.gpte.redhat.com/v1",
+              "kind": "AnarchySubject",
+              "name": "babylon-openshift-cluster-abc123",
+              "namespace": "anarchy-operator"
+            }
+          }
+        ],
+        "summary": {
+          "healthy": 1,
+          "unhealthy": 0,
+          "unknown": 0
+        },
+        "lifespan": {
+          "end": "2023-01-01T18:00:00Z",
+          "remaining": "7h45m"
+        }
+      }
+    }
+  ]
+}
+```
+
+==== Get All Resource Claims (Cluster-wide)
+Retrieve resource claims across all namespaces (requires cluster permissions).
+
+```http
+GET /apis/poolboy.gpte.redhat.com/v1/resourceclaims
+```
+
+=== Get Resource Claim
+
+==== Retrieve Specific Resource Claim
+Get detailed information about a specific resource claim.
+
+```http
+GET /apis/poolboy.gpte.redhat.com/v1/namespaces/{namespace}/resourceclaims/{name}
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "poolboy.gpte.redhat.com/v1",
+  "kind": "ResourceClaim",
+  "metadata": {
+    "name": "openshift-workshop-abc123",
+    "namespace": "user-johndoe",
+    "uid": "550e8400-e29b-41d4-a716-446655440000",
+    "creationTimestamp": "2023-01-01T10:00:00Z",
+    "generation": 1,
+    "resourceVersion": "12340"
+  },
+  "spec": {
+    "resources": [
+      {
+        "provider": {
+          "name": "babylon",
+          "namespace": "poolboy"
+        },
+        "template": {
+          "apiVersion": "babylon.gpte.redhat.com/v1",
+          "kind": "CatalogItem",
+          "metadata": {
+            "name": "openshift-workshop",
+            "namespace": "babylon-catalog"
+          },
+          "spec": {
+            "parameters": {
+              "user_count": 1,
+              "aws_region": "us-east-1",
+              "openshift_version": "4.12"
+            }
+          }
+        }
+      }
+    ],
+    "lifespan": {
+      "end": "2023-01-01T18:00:00Z"
+    }
+  },
+  "status": {
+    "phase": "Ready",
+    "conditions": [
+      {
+        "type": "Ready",
+        "status": "True",
+        "lastTransitionTime": "2023-01-01T10:15:00Z",
+        "reason": "ProvisionComplete",
+        "message": "All resources provisioned successfully"
+      }
+    ],
+    "resources": [
+      {
+        "name": "babylon-openshift-cluster",
+        "state": "Ready",
+        "reference": {
+          "apiVersion": "anarchy.gpte.redhat.com/v1",
+          "kind": "AnarchySubject",
+          "name": "babylon-openshift-cluster-abc123",
+          "namespace": "anarchy-operator"
+        },
+        "consoleUrl": "https://console-openshift-console.apps.cluster-abc123.example.com",
+        "credentials": {
+          "admin": {
+            "username": "admin",
+            "password": "secure-password-123"
+          }
+        }
+      }
+    ],
+    "summary": {
+      "healthy": 1,
+      "total": 1
+    }
+  }
+}
+```
+
+=== Create Resource Claim
+
+==== Submit New Resource Claim
+Create a new resource claim for provisioning.
+
+```http
+POST /apis/poolboy.gpte.redhat.com/v1/namespaces/{namespace}/resourceclaims
+```
+
+**Request Body**:
+```json
+{
+  "apiVersion": "poolboy.gpte.redhat.com/v1",
+  "kind": "ResourceClaim",
+  "metadata": {
+    "name": "my-openshift-workshop",
+    "namespace": "user-johndoe",
+    "labels": {
+      "babylon.gpte.redhat.com/catalogItem": "openshift-workshop",
+      "babylon.gpte.redhat.com/user": "johndoe"
+    },
+    "annotations": {
+      "babylon.gpte.redhat.com/displayName": "My OpenShift Workshop",
+      "babylon.gpte.redhat.com/requestedBy": "johndoe@example.com"
+    }
+  },
+  "spec": {
+    "resources": [
+      {
+        "provider": {
+          "name": "babylon",
+          "namespace": "poolboy"
+        },
+        "template": {
+          "apiVersion": "babylon.gpte.redhat.com/v1",
+          "kind": "CatalogItem",
+          "metadata": {
+            "name": "openshift-workshop",
+            "namespace": "babylon-catalog"
+          },
+          "spec": {
+            "parameters": {
+              "user_count": 1,
+              "aws_region": "us-east-1",
+              "openshift_version": "4.12",
+              "cluster_size": "medium"
+            }
+          }
+        }
+      }
+    ],
+    "lifespan": {
+      "end": "2023-01-01T18:00:00Z"
+    }
+  }
+}
+```
+
+=== Update Resource Claim
+
+==== Modify Resource Claim
+Update resource claim specifications (typically lifespan extension).
+
+```http
+PATCH /apis/poolboy.gpte.redhat.com/v1/namespaces/{namespace}/resourceclaims/{name}
+```
+
+**Request Body** (JSON Patch format):
+```json
+[
+  {
+    "op": "replace",
+    "path": "/spec/lifespan/end",
+    "value": "2023-01-02T18:00:00Z"
+  }
+]
+```
+
+=== Delete Resource Claim
+
+==== Remove Resource Claim
+Delete a resource claim and trigger cleanup.
+
+```http
+DELETE /apis/poolboy.gpte.redhat.com/v1/namespaces/{namespace}/resourceclaims/{name}
+```
+
+**Query Parameters**:
+* `gracePeriodSeconds` (integer): Grace period for deletion
+* `propagationPolicy` (string): How to handle dependent objects
+
+== Resource Handles
+
+=== List Resource Handles
+
+==== Get Resource Handles
+Retrieve resource handles from the poolboy namespace.
+
+```http
+GET /apis/poolboy.gpte.redhat.com/v1/namespaces/poolboy/resourcehandles
+```
+
+**Query Parameters**:
+* `labelSelector` (string): Filter by labels (e.g., pool name, status)
+* `fieldSelector` (string): Field-based filtering
+* `limit` (integer): Maximum number of items
+* `continue` (string): Pagination token
+
+**Example Request**:
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://api.cluster.example.com/apis/poolboy.gpte.redhat.com/v1/namespaces/poolboy/resourcehandles?labelSelector=poolboy.gpte.redhat.com/resource-pool-name=openshift-workshop-pool"
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "poolboy.gpte.redhat.com/v1",
+  "kind": "ResourceHandleList",
+  "metadata": {
+    "resourceVersion": "12350"
+  },
+  "items": [
+    {
+      "apiVersion": "poolboy.gpte.redhat.com/v1",
+      "kind": "ResourceHandle",
+      "metadata": {
+        "name": "babylon-openshift-handle-001",
+        "namespace": "poolboy",
+        "uid": "660e8400-e29b-41d4-a716-446655440001",
+        "creationTimestamp": "2023-01-01T08:00:00Z",
+        "labels": {
+          "poolboy.gpte.redhat.com/resource-pool-name": "openshift-workshop-pool",
+          "poolboy.gpte.redhat.com/resource-provider-name": "babylon"
+        }
+      },
+      "spec": {
+        "resources": [
+          {
+            "provider": {
+              "name": "babylon",
+              "namespace": "poolboy"
+            },
+            "reference": {
+              "apiVersion": "anarchy.gpte.redhat.com/v1",
+              "kind": "AnarchySubject",
+              "name": "babylon-openshift-cluster-001",
+              "namespace": "anarchy-operator"
+            }
+          }
+        ],
+        "resourceClaim": {
+          "name": "openshift-workshop-abc123",
+          "namespace": "user-johndoe"
+        },
+        "lifespan": {
+          "end": "2023-01-01T18:00:00Z"
+        }
+      },
+      "status": {
+        "phase": "Bound",
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "lastTransitionTime": "2023-01-01T08:15:00Z",
+            "reason": "ResourceReady",
+            "message": "Resource is ready for use"
+          }
+        ],
+        "resources": [
+          {
+            "name": "babylon-openshift-cluster",
+            "state": "Ready",
+            "reference": {
+              "apiVersion": "anarchy.gpte.redhat.com/v1",
+              "kind": "AnarchySubject",
+              "name": "babylon-openshift-cluster-001",
+              "namespace": "anarchy-operator"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+=== Get Resource Handle
+
+==== Retrieve Specific Resource Handle
+Get detailed information about a specific resource handle.
+
+```http
+GET /apis/poolboy.gpte.redhat.com/v1/namespaces/poolboy/resourcehandles/{name}
+```
+
+== Resource Pools
+
+=== List Resource Pools
+
+==== Get All Resource Pools
+Retrieve all resource pools in the system.
+
+```http
+GET /apis/poolboy.gpte.redhat.com/v1/namespaces/poolboy/resourcepools
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "poolboy.gpte.redhat.com/v1",
+  "kind": "ResourcePoolList",
+  "metadata": {
+    "resourceVersion": "12360"
+  },
+  "items": [
+    {
+      "apiVersion": "poolboy.gpte.redhat.com/v1",
+      "kind": "ResourcePool",
+      "metadata": {
+        "name": "openshift-workshop-pool",
+        "namespace": "poolboy",
+        "uid": "770e8400-e29b-41d4-a716-446655440002",
+        "creationTimestamp": "2023-01-01T06:00:00Z"
+      },
+      "spec": {
+        "resources": [
+          {
+            "provider": {
+              "name": "babylon",
+              "namespace": "poolboy"
+            },
+            "template": {
+              "apiVersion": "babylon.gpte.redhat.com/v1",
+              "kind": "CatalogItem",
+              "metadata": {
+                "name": "openshift-workshop",
+                "namespace": "babylon-catalog"
+              },
+              "spec": {
+                "parameters": {
+                  "user_count": 1,
+                  "aws_region": "us-east-1",
+                  "openshift_version": "4.12"
+                }
+              }
+            }
+          }
+        ],
+        "minAvailable": 5,
+        "maxSize": 20,
+        "lifespan": {
+          "default": "4h",
+          "maximum": "8h",
+          "unclaimed": "1h"
+        }
+      },
+      "status": {
+        "phase": "Active",
+        "summary": {
+          "total": 15,
+          "available": 8,
+          "claimed": 7,
+          "provisioning": 0,
+          "deleting": 0
+        },
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "lastTransitionTime": "2023-01-01T06:30:00Z",
+            "reason": "PoolReady",
+            "message": "Resource pool is operational"
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+=== Get Resource Pool
+
+==== Retrieve Specific Resource Pool
+Get detailed information about a specific resource pool.
+
+```http
+GET /apis/poolboy.gpte.redhat.com/v1/namespaces/poolboy/resourcepools/{name}
+```
+
+== Resource Providers
+
+=== List Resource Providers
+
+==== Get All Resource Providers
+Retrieve all resource providers configured in the system.
+
+```http
+GET /apis/poolboy.gpte.redhat.com/v1/namespaces/poolboy/resourceproviders
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "poolboy.gpte.redhat.com/v1",
+  "kind": "ResourceProviderList",
+  "metadata": {
+    "resourceVersion": "12370"
+  },
+  "items": [
+    {
+      "apiVersion": "poolboy.gpte.redhat.com/v1",
+      "kind": "ResourceProvider",
+      "metadata": {
+        "name": "babylon",
+        "namespace": "poolboy",
+        "uid": "880e8400-e29b-41d4-a716-446655440003",
+        "creationTimestamp": "2023-01-01T05:00:00Z"
+      },
+      "spec": {
+        "override": {
+          "apiVersion": "anarchy.gpte.redhat.com/v1",
+          "kind": "AnarchyGovernor",
+          "name": "babylon",
+          "namespace": "anarchy-operator"
+        },
+        "validation": {
+          "openAPIV3Schema": {
+            "type": "object",
+            "properties": {
+              "spec": {
+                "type": "object",
+                "properties": {
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "user_count": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100
+                      },
+                      "aws_region": {
+                        "type": "string",
+                        "enum": ["us-east-1", "us-west-2", "eu-west-1"]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "status": {
+        "phase": "Active",
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "lastTransitionTime": "2023-01-01T05:15:00Z",
+            "reason": "ProviderReady",
+            "message": "Resource provider is operational"
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+=== Get Resource Provider
+
+==== Retrieve Specific Resource Provider
+Get detailed information about a specific resource provider.
+
+```http
+GET /apis/poolboy.gpte.redhat.com/v1/namespaces/poolboy/resourceproviders/{name}
+```
+
+== Watch Resources
+
+=== Watch Resource Changes
+
+==== Stream Resource Updates
+Monitor real-time changes to resources using Kubernetes watch API.
+
+```http
+GET /apis/poolboy.gpte.redhat.com/v1/namespaces/{namespace}/resourceclaims?watch=true
+```
+
+**Example using Server-Sent Events**:
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  -H "Accept: application/json" \
+  -N "https://api.cluster.example.com/apis/poolboy.gpte.redhat.com/v1/namespaces/user-johndoe/resourceclaims?watch=true"
+```
+
+**Stream Response Format**:
+```json
+{"type":"ADDED","object":{"apiVersion":"poolboy.gpte.redhat.com/v1","kind":"ResourceClaim",...}}
+{"type":"MODIFIED","object":{"apiVersion":"poolboy.gpte.redhat.com/v1","kind":"ResourceClaim",...}}
+{"type":"DELETED","object":{"apiVersion":"poolboy.gpte.redhat.com/v1","kind":"ResourceClaim",...}}
+```
+
+== kubectl Integration
+
+=== Basic kubectl Commands
+
+==== Resource Claims Operations
+```bash
+# List resource claims
+kubectl get resourceclaims -n user-johndoe
+
+# Get specific resource claim
+kubectl get resourceclaim my-workshop -n user-johndoe -o yaml
+
+# Create resource claim from file
+kubectl apply -f resource-claim.yaml
+
+# Delete resource claim
+kubectl delete resourceclaim my-workshop -n user-johndoe
+
+# Watch resource claim changes
+kubectl get resourceclaims -n user-johndoe -w
+
+# Describe resource claim (includes events)
+kubectl describe resourceclaim my-workshop -n user-johndoe
+```
+
+==== Resource Pool Operations
+```bash
+# List resource pools
+kubectl get resourcepools -n poolboy
+
+# Get resource pool details
+kubectl get resourcepool openshift-workshop-pool -n poolboy -o yaml
+
+# Check resource pool status
+kubectl describe resourcepool openshift-workshop-pool -n poolboy
+```
+
+==== Resource Handle Operations
+```bash
+# List all resource handles
+kubectl get resourcehandles -n poolboy
+
+# Filter by pool name
+kubectl get resourcehandles -n poolboy -l poolboy.gpte.redhat.com/resource-pool-name=openshift-workshop-pool
+
+# Get handle details
+kubectl get resourcehandle babylon-openshift-handle-001 -n poolboy -o yaml
+```
+
+=== Advanced kubectl Usage
+
+==== JSONPath Queries
+```bash
+# Get resource claim status
+kubectl get resourceclaim my-workshop -n user-johndoe -o jsonpath='{.status.phase}'
+
+# List all ready resource claims
+kubectl get resourceclaims -A -o jsonpath='{.items[?(@.status.phase=="Ready")].metadata.name}'
+
+# Get resource URLs
+kubectl get resourceclaims -n user-johndoe -o jsonpath='{.items[*].status.resources[*].consoleUrl}'
+
+# Pool utilization
+kubectl get resourcepools -n poolboy -o jsonpath='{.items[*].status.summary}'
+```
+
+==== Label and Field Selectors
+```bash
+# Filter by catalog item
+kubectl get resourceclaims -A -l babylon.gpte.redhat.com/catalogItem=openshift-workshop
+
+# Filter by user
+kubectl get resourceclaims -A -l babylon.gpte.redhat.com/user=johndoe
+
+# Filter by phase
+kubectl get resourceclaims -A --field-selector status.phase=Ready
+
+# Complex label selector
+kubectl get resourceclaims -A -l 'babylon.gpte.redhat.com/catalogItem in (openshift-workshop,ansible-workshop)'
+```
+
+== Client Library Examples
+
+=== Python with kubernetes-client
+```python
+from kubernetes import client, config
+from kubernetes.client.rest import ApiException
+
+# Load kubeconfig
+config.load_kube_config()
+
+# Create custom objects API client
+api = client.CustomObjectsApi()
+
+# List resource claims
+try:
+    resource_claims = api.list_namespaced_custom_object(
+        group="poolboy.gpte.redhat.com",
+        version="v1",
+        namespace="user-johndoe",
+        plural="resourceclaims"
+    )
+    for claim in resource_claims['items']:
+        print(f"Claim: {claim['metadata']['name']}, Status: {claim['status']['phase']}")
+except ApiException as e:
+    print(f"Exception: {e}")
+
+# Create resource claim
+resource_claim = {
+    "apiVersion": "poolboy.gpte.redhat.com/v1",
+    "kind": "ResourceClaim",
+    "metadata": {
+        "name": "my-workshop",
+        "namespace": "user-johndoe"
+    },
+    "spec": {
+        "resources": [{
+            "provider": {"name": "babylon", "namespace": "poolboy"},
+            "template": {
+                "apiVersion": "babylon.gpte.redhat.com/v1",
+                "kind": "CatalogItem",
+                "metadata": {"name": "openshift-workshop", "namespace": "babylon-catalog"}
+            }
+        }]
+    }
+}
+
+try:
+    api.create_namespaced_custom_object(
+        group="poolboy.gpte.redhat.com",
+        version="v1",
+        namespace="user-johndoe",
+        plural="resourceclaims",
+        body=resource_claim
+    )
+    print("Resource claim created successfully")
+except ApiException as e:
+    print(f"Exception creating resource claim: {e}")
+```
+
+=== JavaScript with @kubernetes/client-node
+```javascript
+const k8s = require('@kubernetes/client-node');
+
+const kc = new k8s.KubeConfig();
+kc.loadFromDefault();
+
+const k8sApi = kc.makeApiClient(k8s.CustomObjectsApi);
+
+// List resource claims
+async function listResourceClaims() {
+    try {
+        const response = await k8sApi.listNamespacedCustomObject(
+            'poolboy.gpte.redhat.com',
+            'v1',
+            'user-johndoe',
+            'resourceclaims'
+        );
+
+        response.body.items.forEach(claim => {
+            console.log(`Claim: ${claim.metadata.name}, Status: ${claim.status.phase}`);
+        });
+    } catch (err) {
+        console.error('Error listing resource claims:', err);
+    }
+}
+
+// Watch resource claims
+function watchResourceClaims() {
+    const watch = new k8s.Watch(kc);
+
+    watch.watch('/apis/poolboy.gpte.redhat.com/v1/namespaces/user-johndoe/resourceclaims',
+        {},
+        (type, obj) => {
+            console.log(`Event: ${type}, Resource: ${obj.metadata.name}, Phase: ${obj.status.phase}`);
+        },
+        (err) => {
+            console.error('Watch error:', err);
+        }
+    );
+}
+
+listResourceClaims();
+watchResourceClaims();
+```
+
+== Error Responses
+
+=== Kubernetes API Error Format
+Poolboy API follows standard Kubernetes error response format:
+
+```json
+{
+  "kind": "Status",
+  "apiVersion": "v1",
+  "metadata": {},
+  "status": "Failure",
+  "message": "resourceclaims.poolboy.gpte.redhat.com \"invalid-name\" not found",
+  "reason": "NotFound",
+  "details": {
+    "name": "invalid-name",
+    "group": "poolboy.gpte.redhat.com",
+    "kind": "resourceclaims"
+  },
+  "code": 404
+}
+```
+
+=== Common Error Codes
+
+==== 400 Bad Request
+```json
+{
+  "kind": "Status",
+  "apiVersion": "v1",
+  "status": "Failure",
+  "message": "ResourceClaim.poolboy.gpte.redhat.com \"my-workshop\" is invalid",
+  "reason": "Invalid",
+  "details": {
+    "name": "my-workshop",
+    "group": "poolboy.gpte.redhat.com",
+    "kind": "ResourceClaim",
+    "causes": [
+      {
+        "reason": "FieldValueRequired",
+        "message": "Required value: spec.resources is required",
+        "field": "spec.resources"
+      }
+    ]
+  },
+  "code": 400
+}
+```
+
+==== 403 Forbidden
+```json
+{
+  "kind": "Status",
+  "apiVersion": "v1",
+  "status": "Failure",
+  "message": "resourceclaims.poolboy.gpte.redhat.com is forbidden: User \"johndoe\" cannot create resource \"resourceclaims\" in API group \"poolboy.gpte.redhat.com\" in the namespace \"restricted-namespace\"",
+  "reason": "Forbidden",
+  "details": {
+    "group": "poolboy.gpte.redhat.com",
+    "kind": "resourceclaims"
+  },
+  "code": 403
+}
+```
+
+==== 409 Conflict
+```json
+{
+  "kind": "Status",
+  "apiVersion": "v1",
+  "status": "Failure",
+  "message": "resourceclaims.poolboy.gpte.redhat.com \"my-workshop\" already exists",
+  "reason": "AlreadyExists",
+  "details": {
+    "name": "my-workshop",
+    "group": "poolboy.gpte.redhat.com",
+    "kind": "resourceclaims"
+  },
+  "code": 409
+}
+```
+
+The Poolboy API provides comprehensive resource lifecycle management through standard Kubernetes API patterns, enabling efficient resource pooling, provisioning automation, and seamless integration with Kubernetes-native tooling and workflows.

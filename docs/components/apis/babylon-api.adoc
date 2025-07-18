@@ -1,0 +1,954 @@
+= Babylon API
+
+== Overview
+
+The Babylon API provides Kubernetes Custom Resource Definitions (CRDs) for managing workshops, catalog items, and platform-specific resources. It extends the Kubernetes API with domain-specific resources for educational content delivery, workshop orchestration, and catalog management.
+
+== API Base URL
+
+Babylon extends the Kubernetes API server with custom resources:
+
+```
+https://api.cluster.example.com/apis/babylon.gpte.redhat.com/v1
+```
+
+== Authentication
+
+Babylon API uses standard Kubernetes authentication (service accounts, RBAC, and bearer tokens):
+
+```bash
+# Using kubectl
+kubectl get catalogitems -n babylon-catalog-workshops
+
+# Using direct API calls
+curl -H "Authorization: Bearer $K8S_TOKEN" \
+  https://api.cluster.example.com/apis/babylon.gpte.redhat.com/v1/namespaces/babylon-catalog-workshops/catalogitems
+```
+
+== Catalog Items
+
+=== List Catalog Items
+
+==== Get Catalog Items in Namespace
+Retrieve catalog items for a specific namespace.
+
+```http
+GET /apis/babylon.gpte.redhat.com/v1/namespaces/{namespace}/catalogitems
+```
+
+**Query Parameters**:
+* `labelSelector` (string): Kubernetes label selector for filtering
+* `fieldSelector` (string): Field selector for filtering
+* `limit` (integer): Maximum number of items to return
+* `continue` (string): Continuation token for pagination
+
+**Example Request**:
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://api.cluster.example.com/apis/babylon.gpte.redhat.com/v1/namespaces/babylon-catalog-workshops/catalogitems?labelSelector=babylon.gpte.redhat.com/category=workshops"
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "babylon.gpte.redhat.com/v1",
+  "kind": "CatalogItemList",
+  "metadata": {
+    "continue": "eyJ2IjoibWV0YS5rOHMuaW8vdjEi...",
+    "resourceVersion": "12345"
+  },
+  "items": [
+    {
+      "apiVersion": "babylon.gpte.redhat.com/v1",
+      "kind": "CatalogItem",
+      "metadata": {
+        "name": "openshift-fundamentals",
+        "namespace": "babylon-catalog-workshops",
+        "uid": "550e8400-e29b-41d4-a716-446655440000",
+        "creationTimestamp": "2023-01-01T10:00:00Z",
+        "generation": 1,
+        "resourceVersion": "12340",
+        "labels": {
+          "babylon.gpte.redhat.com/category": "workshops",
+          "babylon.gpte.redhat.com/provider": "redhat",
+          "babylon.gpte.redhat.com/level": "intermediate"
+        },
+        "annotations": {
+          "babylon.gpte.redhat.com/catalogDisplayName": "babylon-catalog-workshops",
+          "babylon.gpte.redhat.com/displayName": "OpenShift Fundamentals Workshop"
+        }
+      },
+      "spec": {
+        "displayName": "OpenShift Fundamentals Workshop",
+        "description": "Hands-on workshop covering OpenShift fundamentals including container orchestration, application deployment, and platform operations.",
+        "longDescription": "This comprehensive workshop provides participants with practical experience in OpenShift fundamentals...",
+        "category": "workshops",
+        "keywords": ["openshift", "containers", "kubernetes", "devops"],
+        "icon": "data:image/svg+xml;base64,PHN2Zy...",
+        "provider": {
+          "name": "redhat",
+          "displayName": "Red Hat Training"
+        },
+        "runtime": {
+          "estimatedTime": "4h",
+          "difficulty": "intermediate",
+          "prerequisites": ["basic-linux", "container-concepts"]
+        },
+        "lifespan": {
+          "default": "8h",
+          "maximum": "24h",
+          "relativeMaximum": "7d"
+        },
+        "parameters": [
+          {
+            "name": "user_count",
+            "displayName": "Number of Users",
+            "description": "Number of user environments to provision",
+            "openAPIV3Schema": {
+              "type": "integer",
+              "default": 1,
+              "minimum": 1,
+              "maximum": 100
+            },
+            "required": true
+          },
+          {
+            "name": "openshift_version",
+            "displayName": "OpenShift Version",
+            "description": "OpenShift cluster version",
+            "openAPIV3Schema": {
+              "type": "string",
+              "default": "4.12",
+              "enum": ["4.10", "4.11", "4.12", "4.13"]
+            },
+            "required": false
+          }
+        ],
+        "resources": {
+          "cpu": "4 cores per user",
+          "memory": "16GB per user",
+          "storage": "100GB per user",
+          "estimatedCost": "$2.50/hour per user"
+        },
+        "accessControl": {
+          "allowedRoles": ["user", "instructor"],
+          "requireApproval": false
+        }
+      },
+      "status": {
+        "phase": "Available",
+        "conditions": [
+          {
+            "type": "Available",
+            "status": "True",
+            "lastTransitionTime": "2023-01-01T10:00:00Z",
+            "reason": "CatalogItemReady",
+            "message": "Catalog item is ready for provisioning"
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+=== Get Catalog Item
+
+==== Retrieve Specific Catalog Item
+Get detailed information about a specific catalog item.
+
+```http
+GET /apis/babylon.gpte.redhat.com/v1/namespaces/{namespace}/catalogitems/{name}
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "babylon.gpte.redhat.com/v1",
+  "kind": "CatalogItem",
+  "metadata": {
+    "name": "openshift-fundamentals",
+    "namespace": "babylon-catalog-workshops",
+    "uid": "550e8400-e29b-41d4-a716-446655440000",
+    "creationTimestamp": "2023-01-01T10:00:00Z"
+  },
+  "spec": {
+    "displayName": "OpenShift Fundamentals Workshop",
+    "description": "Comprehensive hands-on workshop covering OpenShift fundamentals",
+    "category": "workshops",
+    "provider": {
+      "name": "redhat",
+      "displayName": "Red Hat Training"
+    },
+    "runtime": {
+      "estimatedTime": "4h",
+      "difficulty": "intermediate"
+    },
+    "lifespan": {
+      "default": "8h",
+      "maximum": "24h"
+    },
+    "parameters": [
+      {
+        "name": "user_count",
+        "displayName": "Number of Users",
+        "openAPIV3Schema": {
+          "type": "integer",
+          "default": 1,
+          "minimum": 1,
+          "maximum": 100
+        },
+        "required": true
+      }
+    ]
+  },
+  "status": {
+    "phase": "Available",
+    "conditions": [
+      {
+        "type": "Available",
+        "status": "True",
+        "lastTransitionTime": "2023-01-01T10:00:00Z",
+        "reason": "CatalogItemReady",
+        "message": "Catalog item is ready for provisioning"
+      }
+    ]
+  }
+}
+```
+
+=== Create Catalog Item
+
+==== Submit New Catalog Item
+Create a new catalog item for the service catalog.
+
+```http
+POST /apis/babylon.gpte.redhat.com/v1/namespaces/{namespace}/catalogitems
+```
+
+**Request Body**:
+```json
+{
+  "apiVersion": "babylon.gpte.redhat.com/v1",
+  "kind": "CatalogItem",
+  "metadata": {
+    "name": "advanced-kubernetes-workshop",
+    "namespace": "babylon-catalog-workshops",
+    "labels": {
+      "babylon.gpte.redhat.com/category": "workshops",
+      "babylon.gpte.redhat.com/provider": "redhat"
+    }
+  },
+  "spec": {
+    "displayName": "Advanced Kubernetes Workshop",
+    "description": "Deep dive into advanced Kubernetes concepts and operations",
+    "category": "workshops",
+    "keywords": ["kubernetes", "advanced", "operators", "networking"],
+    "provider": {
+      "name": "redhat",
+      "displayName": "Red Hat Training"
+    },
+    "runtime": {
+      "estimatedTime": "6h",
+      "difficulty": "advanced",
+      "prerequisites": ["kubernetes-fundamentals", "container-runtime"]
+    },
+    "lifespan": {
+      "default": "8h",
+      "maximum": "24h"
+    },
+    "parameters": [
+      {
+        "name": "user_count",
+        "displayName": "Number of Users",
+        "openAPIV3Schema": {
+          "type": "integer",
+          "default": 1,
+          "minimum": 1,
+          "maximum": 50
+        },
+        "required": true
+      },
+      {
+        "name": "cluster_size",
+        "displayName": "Cluster Size",
+        "openAPIV3Schema": {
+          "type": "string",
+          "default": "medium",
+          "enum": ["small", "medium", "large"]
+        },
+        "required": false
+      }
+    ],
+    "resources": {
+      "cpu": "8 cores per user",
+      "memory": "32GB per user",
+      "storage": "200GB per user"
+    }
+  }
+}
+```
+
+== Workshops
+
+=== List Workshops
+
+==== Get Workshops in Namespace
+Retrieve workshops for a specific namespace.
+
+```http
+GET /apis/babylon.gpte.redhat.com/v1/namespaces/{namespace}/workshops
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "babylon.gpte.redhat.com/v1",
+  "kind": "WorkshopList",
+  "metadata": {
+    "resourceVersion": "12350"
+  },
+  "items": [
+    {
+      "apiVersion": "babylon.gpte.redhat.com/v1",
+      "kind": "Workshop",
+      "metadata": {
+        "name": "openshift-fundamentals-dec2023",
+        "namespace": "user-instructor-jane-20231215",
+        "uid": "660e8400-e29b-41d4-a716-446655440001",
+        "creationTimestamp": "2023-12-01T10:00:00Z",
+        "labels": {
+          "babylon.gpte.redhat.com/instructor": "jane",
+          "babylon.gpte.redhat.com/catalogItem": "openshift-fundamentals"
+        }
+      },
+      "spec": {
+        "displayName": "OpenShift Fundamentals - December 2023",
+        "description": "Monthly OpenShift fundamentals workshop for new team members",
+        "accessPassword": "workshop2023",
+        "openRegistration": false,
+        "lifespan": {
+          "start": "2023-12-15T09:00:00Z",
+          "end": "2023-12-15T17:00:00Z",
+          "maximum": "10h"
+        },
+        "actionSchedule": {
+          "start": "2023-12-15T08:30:00Z",
+          "stop": "2023-12-15T18:00:00Z"
+        },
+        "labUserInterface": {
+          "redirect": true
+        }
+      },
+      "status": {
+        "phase": "Active",
+        "conditions": [
+          {
+            "type": "Active",
+            "status": "True",
+            "lastTransitionTime": "2023-12-15T08:30:00Z",
+            "reason": "WorkshopStarted",
+            "message": "Workshop is active and accepting participants"
+          }
+        ],
+        "summary": {
+          "registered": 25,
+          "assigned": 23,
+          "active": 20,
+          "completed": 0
+        }
+      }
+    }
+  ]
+}
+```
+
+=== Get Workshop
+
+==== Retrieve Specific Workshop
+Get detailed information about a specific workshop.
+
+```http
+GET /apis/babylon.gpte.redhat.com/v1/namespaces/{namespace}/workshops/{name}
+```
+
+=== Create Workshop
+
+==== Submit New Workshop
+Create a new workshop for instructor-led training.
+
+```http
+POST /apis/babylon.gpte.redhat.com/v1/namespaces/{namespace}/workshops
+```
+
+**Request Body**:
+```json
+{
+  "apiVersion": "babylon.gpte.redhat.com/v1",
+  "kind": "Workshop",
+  "metadata": {
+    "name": "kubernetes-advanced-jan2024",
+    "namespace": "user-instructor-alice-20240115",
+    "labels": {
+      "babylon.gpte.redhat.com/instructor": "alice",
+      "babylon.gpte.redhat.com/catalogItem": "kubernetes-advanced"
+    }
+  },
+  "spec": {
+    "displayName": "Advanced Kubernetes Workshop - January 2024",
+    "description": "Intensive advanced Kubernetes workshop covering operators, networking, and security",
+    "accessPassword": "k8s-advanced-2024",
+    "openRegistration": true,
+    "lifespan": {
+      "start": "2024-01-15T09:00:00Z",
+      "end": "2024-01-17T17:00:00Z",
+      "maximum": "72h"
+    },
+    "actionSchedule": {
+      "start": "2024-01-15T08:00:00Z",
+      "stop": "2024-01-17T18:00:00Z"
+    },
+    "labUserInterface": {
+      "redirect": true
+    }
+  }
+}
+```
+
+== Workshop Provisions
+
+=== List Workshop Provisions
+
+==== Get Workshop Provisions
+Retrieve workshop provisioning configurations.
+
+```http
+GET /apis/babylon.gpte.redhat.com/v1/namespaces/{namespace}/workshopprovisions
+```
+
+**Query Parameters**:
+* `labelSelector` (string): Filter by labels (e.g., workshop name)
+
+**Example Request**:
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://api.cluster.example.com/apis/babylon.gpte.redhat.com/v1/namespaces/user-instructor-jane-20231215/workshopprovisions?labelSelector=babylon.gpte.redhat.com/workshop=openshift-fundamentals-dec2023"
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "babylon.gpte.redhat.com/v1",
+  "kind": "WorkshopProvisionList",
+  "metadata": {
+    "resourceVersion": "12360"
+  },
+  "items": [
+    {
+      "apiVersion": "babylon.gpte.redhat.com/v1",
+      "kind": "WorkshopProvision",
+      "metadata": {
+        "name": "openshift-fundamentals-provision",
+        "namespace": "user-instructor-jane-20231215",
+        "uid": "770e8400-e29b-41d4-a716-446655440002",
+        "creationTimestamp": "2023-12-14T20:00:00Z",
+        "labels": {
+          "babylon.gpte.redhat.com/workshop": "openshift-fundamentals-dec2023"
+        }
+      },
+      "spec": {
+        "workshopName": "openshift-fundamentals-dec2023",
+        "catalogItem": {
+          "name": "openshift-fundamentals",
+          "namespace": "babylon-catalog-workshops"
+        },
+        "count": 30,
+        "concurrency": 5,
+        "startDelay": 60,
+        "enableResourcePools": true,
+        "lifespan": {
+          "start": "2023-12-14T20:00:00Z",
+          "end": "2023-12-15T18:00:00Z"
+        },
+        "parameters": {
+          "user_count": 1,
+          "openshift_version": "4.12",
+          "aws_region": "us-east-1"
+        }
+      },
+      "status": {
+        "phase": "Complete",
+        "conditions": [
+          {
+            "type": "Complete",
+            "status": "True",
+            "lastTransitionTime": "2023-12-14T22:30:00Z",
+            "reason": "ProvisioningComplete",
+            "message": "All workshop environments have been provisioned"
+          }
+        ],
+        "summary": {
+          "total": 30,
+          "ready": 28,
+          "failed": 2,
+          "provisioning": 0
+        }
+      }
+    }
+  ]
+}
+```
+
+=== Create Workshop Provision
+
+==== Submit Workshop Provision Request
+Create a workshop provision configuration for bulk provisioning.
+
+```http
+POST /apis/babylon.gpte.redhat.com/v1/namespaces/{namespace}/workshopprovisions
+```
+
+**Request Body**:
+```json
+{
+  "apiVersion": "babylon.gpte.redhat.com/v1",
+  "kind": "WorkshopProvision",
+  "metadata": {
+    "name": "kubernetes-advanced-provision",
+    "namespace": "user-instructor-alice-20240115",
+    "labels": {
+      "babylon.gpte.redhat.com/workshop": "kubernetes-advanced-jan2024"
+    }
+  },
+  "spec": {
+    "workshopName": "kubernetes-advanced-jan2024",
+    "catalogItem": {
+      "name": "kubernetes-advanced",
+      "namespace": "babylon-catalog-workshops"
+    },
+    "count": 20,
+    "concurrency": 4,
+    "startDelay": 90,
+    "enableResourcePools": true,
+    "lifespan": {
+      "start": "2024-01-14T18:00:00Z",
+      "end": "2024-01-17T18:00:00Z"
+    },
+    "parameters": {
+      "user_count": 1,
+      "cluster_size": "large",
+      "enable_monitoring": true
+    }
+  }
+}
+```
+
+== Workshop User Assignments
+
+=== List Workshop User Assignments
+
+==== Get User Assignments for Workshop
+Retrieve user assignments for a specific workshop.
+
+```http
+GET /apis/babylon.gpte.redhat.com/v1/namespaces/{namespace}/workshopuserassignments
+```
+
+**Query Parameters**:
+* `labelSelector` (string): Filter by workshop name
+
+**Example Request**:
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://api.cluster.example.com/apis/babylon.gpte.redhat.com/v1/namespaces/user-instructor-jane-20231215/workshopuserassignments?labelSelector=babylon.gpte.redhat.com/workshop=openshift-fundamentals-dec2023"
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "babylon.gpte.redhat.com/v1",
+  "kind": "WorkshopUserAssignmentList",
+  "metadata": {
+    "resourceVersion": "12370"
+  },
+  "items": [
+    {
+      "apiVersion": "babylon.gpte.redhat.com/v1",
+      "kind": "WorkshopUserAssignment",
+      "metadata": {
+        "name": "workshop-user-alice",
+        "namespace": "user-instructor-jane-20231215",
+        "uid": "880e8400-e29b-41d4-a716-446655440003",
+        "creationTimestamp": "2023-12-15T08:00:00Z",
+        "labels": {
+          "babylon.gpte.redhat.com/workshop": "openshift-fundamentals-dec2023"
+        }
+      },
+      "spec": {
+        "workshopName": "openshift-fundamentals-dec2023",
+        "resourceClaimName": "workshop-provision-001",
+        "assignment": {
+          "email": "alice@example.com",
+          "displayName": "Alice Johnson"
+        },
+        "userName": "alice",
+        "labUserInterface": {
+          "redirect": true
+        }
+      },
+      "status": {
+        "phase": "Assigned",
+        "conditions": [
+          {
+            "type": "Assigned",
+            "status": "True",
+            "lastTransitionTime": "2023-12-15T08:15:00Z",
+            "reason": "UserAssigned",
+            "message": "User successfully assigned to workshop environment"
+          }
+        ],
+        "labUserInterface": {
+          "url": "https://bookbag-alice.apps.cluster-abc123.example.com",
+          "ready": true
+        }
+      }
+    }
+  ]
+}
+```
+
+=== Create Workshop User Assignment
+
+==== Assign User to Workshop
+Create a user assignment for workshop participation.
+
+```http
+POST /apis/babylon.gpte.redhat.com/v1/namespaces/{namespace}/workshopuserassignments
+```
+
+**Request Body**:
+```json
+{
+  "apiVersion": "babylon.gpte.redhat.com/v1",
+  "kind": "WorkshopUserAssignment",
+  "metadata": {
+    "name": "workshop-user-bob",
+    "namespace": "user-instructor-alice-20240115",
+    "labels": {
+      "babylon.gpte.redhat.com/workshop": "kubernetes-advanced-jan2024"
+    }
+  },
+  "spec": {
+    "workshopName": "kubernetes-advanced-jan2024",
+    "assignment": {
+      "email": "bob@example.com",
+      "displayName": "Bob Smith"
+    },
+    "userName": "bob",
+    "labUserInterface": {
+      "redirect": true
+    }
+  }
+}
+```
+
+== kubectl Integration
+
+=== Basic kubectl Commands
+
+==== Catalog Item Operations
+```bash
+# List catalog items
+kubectl get catalogitems -n babylon-catalog-workshops
+
+# Get specific catalog item
+kubectl get catalogitem openshift-fundamentals -n babylon-catalog-workshops -o yaml
+
+# Create catalog item from file
+kubectl apply -f catalog-item.yaml
+
+# Delete catalog item
+kubectl delete catalogitem openshift-fundamentals -n babylon-catalog-workshops
+
+# Describe catalog item
+kubectl describe catalogitem openshift-fundamentals -n babylon-catalog-workshops
+```
+
+==== Workshop Operations
+```bash
+# List workshops
+kubectl get workshops -n user-instructor-jane-20231215
+
+# Get workshop details
+kubectl get workshop openshift-fundamentals-dec2023 -n user-instructor-jane-20231215 -o yaml
+
+# Create workshop
+kubectl apply -f workshop.yaml
+
+# Watch workshop status
+kubectl get workshops -n user-instructor-jane-20231215 -w
+
+# Delete workshop
+kubectl delete workshop openshift-fundamentals-dec2023 -n user-instructor-jane-20231215
+```
+
+==== Workshop Provision Operations
+```bash
+# List workshop provisions
+kubectl get workshopprovisions -n user-instructor-jane-20231215
+
+# Filter by workshop
+kubectl get workshopprovisions -n user-instructor-jane-20231215 -l babylon.gpte.redhat.com/workshop=openshift-fundamentals-dec2023
+
+# Get provision status
+kubectl get workshopprovision openshift-fundamentals-provision -n user-instructor-jane-20231215 -o yaml
+
+# Monitor provision progress
+kubectl describe workshopprovision openshift-fundamentals-provision -n user-instructor-jane-20231215
+```
+
+==== User Assignment Operations
+```bash
+# List user assignments
+kubectl get workshopuserassignments -n user-instructor-jane-20231215
+
+# Filter by workshop
+kubectl get workshopuserassignments -n user-instructor-jane-20231215 -l babylon.gpte.redhat.com/workshop=openshift-fundamentals-dec2023
+
+# Get assignment details
+kubectl get workshopuserassignment workshop-user-alice -n user-instructor-jane-20231215 -o yaml
+
+# Check assignment status
+kubectl describe workshopuserassignment workshop-user-alice -n user-instructor-jane-20231215
+```
+
+=== Advanced kubectl Usage
+
+==== JSONPath Queries
+```bash
+# Get catalog item parameters
+kubectl get catalogitem openshift-fundamentals -n babylon-catalog-workshops -o jsonpath='{.spec.parameters[*].name}'
+
+# Get workshop participant count
+kubectl get workshop openshift-fundamentals-dec2023 -n user-instructor-jane-20231215 -o jsonpath='{.status.summary.registered}'
+
+# List all assigned users
+kubectl get workshopuserassignments -n user-instructor-jane-20231215 -o jsonpath='{.items[*].spec.assignment.email}'
+
+# Get lab interface URLs
+kubectl get workshopuserassignments -n user-instructor-jane-20231215 -o jsonpath='{.items[*].status.labUserInterface.url}'
+```
+
+==== Label and Field Selectors
+```bash
+# Filter catalog items by category
+kubectl get catalogitems -A -l babylon.gpte.redhat.com/category=workshops
+
+# Filter workshops by instructor
+kubectl get workshops -A -l babylon.gpte.redhat.com/instructor=jane
+
+# Filter by catalog item
+kubectl get workshops -A -l babylon.gpte.redhat.com/catalogItem=openshift-fundamentals
+
+# Filter active workshops
+kubectl get workshops -A --field-selector status.phase=Active
+```
+
+== Client Library Examples
+
+=== Python with kubernetes-client
+```python
+from kubernetes import client, config
+from kubernetes.client.rest import ApiException
+
+# Load kubeconfig
+config.load_kube_config()
+
+# Create custom objects API client
+api = client.CustomObjectsApi()
+
+# List catalog items
+try:
+    catalog_items = api.list_namespaced_custom_object(
+        group="babylon.gpte.redhat.com",
+        version="v1",
+        namespace="babylon-catalog-workshops",
+        plural="catalogitems"
+    )
+    for item in catalog_items['items']:
+        print(f"Catalog Item: {item['metadata']['name']}")
+        print(f"  Display Name: {item['spec']['displayName']}")
+        print(f"  Category: {item['spec']['category']}")
+except ApiException as e:
+    print(f"Exception: {e}")
+
+# Create workshop user assignment
+assignment = {
+    "apiVersion": "babylon.gpte.redhat.com/v1",
+    "kind": "WorkshopUserAssignment",
+    "metadata": {
+        "name": "workshop-user-charlie",
+        "namespace": "user-instructor-jane-20231215"
+    },
+    "spec": {
+        "workshopName": "openshift-fundamentals-dec2023",
+        "assignment": {
+            "email": "charlie@example.com",
+            "displayName": "Charlie Brown"
+        },
+        "userName": "charlie"
+    }
+}
+
+try:
+    api.create_namespaced_custom_object(
+        group="babylon.gpte.redhat.com",
+        version="v1",
+        namespace="user-instructor-jane-20231215",
+        plural="workshopuserassignments",
+        body=assignment
+    )
+    print("Workshop user assignment created successfully")
+except ApiException as e:
+    print(f"Exception creating assignment: {e}")
+```
+
+=== JavaScript with @kubernetes/client-node
+```javascript
+const k8s = require('@kubernetes/client-node');
+
+const kc = new k8s.KubeConfig();
+kc.loadFromDefault();
+
+const k8sApi = kc.makeApiClient(k8s.CustomObjectsApi);
+
+// List workshops
+async function listWorkshops() {
+    try {
+        const response = await k8sApi.listNamespacedCustomObject(
+            'babylon.gpte.redhat.com',
+            'v1',
+            'user-instructor-jane-20231215',
+            'workshops'
+        );
+
+        response.body.items.forEach(workshop => {
+            console.log(`Workshop: ${workshop.metadata.name}`);
+            console.log(`  Status: ${workshop.status.phase}`);
+            if (workshop.status.summary) {
+                console.log(`  Participants: ${workshop.status.summary.registered}`);
+            }
+        });
+    } catch (err) {
+        console.error('Error listing workshops:', err);
+    }
+}
+
+// Watch workshop user assignments
+function watchWorkshopAssignments() {
+    const watch = new k8s.Watch(kc);
+
+    watch.watch('/apis/babylon.gpte.redhat.com/v1/namespaces/user-instructor-jane-20231215/workshopuserassignments',
+        {},
+        (type, obj) => {
+            console.log(`Assignment Event: ${type}, User: ${obj.spec.userName}, Status: ${obj.status?.phase || 'pending'}`);
+        },
+        (err) => {
+            console.error('Watch error:', err);
+        }
+    );
+}
+
+listWorkshops();
+watchWorkshopAssignments();
+```
+
+== Error Responses
+
+=== Kubernetes API Error Format
+Babylon API follows standard Kubernetes error response format:
+
+```json
+{
+  "kind": "Status",
+  "apiVersion": "v1",
+  "metadata": {},
+  "status": "Failure",
+  "message": "catalogitems.babylon.gpte.redhat.com \"invalid-item\" not found",
+  "reason": "NotFound",
+  "details": {
+    "name": "invalid-item",
+    "group": "babylon.gpte.redhat.com",
+    "kind": "catalogitems"
+  },
+  "code": 404
+}
+```
+
+=== Validation Errors
+```json
+{
+  "kind": "Status",
+  "apiVersion": "v1",
+  "status": "Failure",
+  "message": "CatalogItem.babylon.gpte.redhat.com \"my-item\" is invalid",
+  "reason": "Invalid",
+  "details": {
+    "causes": [
+      {
+        "reason": "FieldValueRequired",
+        "message": "Required value: spec.displayName is required",
+        "field": "spec.displayName"
+      },
+      {
+        "reason": "FieldValueInvalid",
+        "message": "Invalid value: \"invalid-category\": must be one of workshops, demos, labs",
+        "field": "spec.category"
+      }
+    ]
+  },
+  "code": 400
+}
+```
+
+== Integration Patterns
+
+=== Catalog Item to Resource Claim Integration
+```yaml
+# Example: Using CatalogItem in ResourceClaim template
+apiVersion: poolboy.gpte.redhat.com/v1
+kind: ResourceClaim
+metadata:
+  name: my-workshop-claim
+  namespace: user-johndoe
+spec:
+  resources:
+  - provider:
+      name: babylon
+      namespace: poolboy
+    template:
+      apiVersion: babylon.gpte.redhat.com/v1
+      kind: CatalogItem
+      metadata:
+        name: openshift-fundamentals
+        namespace: babylon-catalog-workshops
+      spec:
+        parameters:
+          user_count: 1
+          aws_region: us-east-1
+```
+
+=== Workshop to User Assignment Integration
+```bash
+# Monitor workshop user assignment creation
+kubectl get workshopuserassignments -n user-instructor-jane-20231215 \
+  -l babylon.gpte.redhat.com/workshop=openshift-fundamentals-dec2023 \
+  -o jsonpath='{.items[*].status.phase}'
+
+# Get all lab interface URLs for a workshop
+kubectl get workshopuserassignments -n user-instructor-jane-20231215 \
+  -l babylon.gpte.redhat.com/workshop=openshift-fundamentals-dec2023 \
+  -o jsonpath='{.items[*].status.labUserInterface.url}'
+```
+
+The Babylon API provides comprehensive workshop and catalog management capabilities through Kubernetes-native patterns, enabling educational content delivery, workshop orchestration, and seamless integration with other platform components through declarative resource management.

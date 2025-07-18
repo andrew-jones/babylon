@@ -1,0 +1,194 @@
+= Core Operators
+
+== Overview
+
+The Babylon Platform's core functionality is implemented through a set of Kubernetes operators that manage custom resources and coordinate with external systems. Each operator is designed to handle specific aspects of the platform's capabilities, from catalog management to workshop provisioning.
+
+== Operator Categories
+
+=== Catalog and Configuration Management
+* **link:agnosticv-operator.adoc[AgnosticV Operator]**: Git repository synchronization and catalog generation
+* **link:catalog-manager.adoc[Catalog Manager]**: Catalog item lifecycle and metadata management
+
+=== Resource Management
+* **link:anarchy-operator.adoc[Anarchy Operator]**: Workflow automation and infrastructure orchestration
+* **link:poolboy-operator.adoc[Poolboy Operator]**: Resource pooling and lifecycle management
+
+=== Workshop and Lab Management
+* **link:workshop-manager.adoc[Workshop Manager]**: Workshop orchestration and user assignment
+* **link:lab-ui-manager.adoc[Lab UI Manager]**: Dynamic lab interface deployment
+
+=== Operations and Monitoring
+* **link:cost-tracker.adoc[Cost Tracker]**: AWS cost monitoring and allocation tracking
+* **link:notifier.adoc[Notifier]**: Event-driven notification system
+
+== Operator Design Patterns
+
+=== Controller Pattern
+All operators implement the standard Kubernetes controller pattern:
+
+```python
+async def reconcile(resource):
+    """Main reconciliation loop for each operator"""
+    desired_state = parse_spec(resource.spec)
+    current_state = get_current_state()
+
+    if desired_state != current_state:
+        actions = plan_actions(desired_state, current_state)
+        for action in actions:
+            await execute_action(action)
+
+    update_status(resource, current_state)
+```
+
+=== Event Handling
+Operators respond to various types of events:
+
+* **Resource Creation**: Initialize new resources
+* **Resource Updates**: Reconcile configuration changes
+* **Resource Deletion**: Clean up associated resources
+* **External Events**: Respond to external system changes
+
+=== Error Handling and Retry Logic
+All operators implement robust error handling:
+
+```python
+from infinite_relative_backoff import InfiniteRelativeBackoff
+
+@kopf.on.startup()
+async def configure_operator(settings):
+    settings.networking.error_backoffs = InfiniteRelativeBackoff()
+    settings.persistence.finalizer = f"{DOMAIN}/operator"
+```
+
+=== Status Reporting
+Operators maintain detailed status information:
+
+```yaml
+status:
+  conditions:
+  - type: Ready
+    status: "True"
+    lastTransitionTime: "2023-01-01T12:00:00Z"
+    reason: ReconciliationSuccessful
+    message: "All resources are ready"
+  observedGeneration: 1
+  phase: Ready
+```
+
+== Inter-Operator Communication
+
+=== Resource Dependencies
+Operators coordinate through resource relationships:
+
+```
+AgnosticVRepo → AgnosticVComponent → CatalogItem → ResourceProvider
+```
+
+=== Event Propagation
+Status changes propagate through the resource hierarchy:
+
+```python
+@kopf.on.field('babylon.gpte.redhat.com', 'v1', 'catalogitems',
+               field='status.phase')
+async def on_catalog_item_status_change(old, new, **kwargs):
+    if new == 'Ready':
+        await create_resource_provider(kwargs['body'])
+```
+
+=== Cross-Namespace Operations
+Some operators need cross-namespace access:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: babylon-agnosticv-operator
+rules:
+- apiGroups: ["babylon.gpte.redhat.com"]
+  resources: ["catalogitems"]
+  verbs: ["create", "get", "list", "patch", "update", "watch"]
+```
+
+== Operator Lifecycle Management
+
+=== Deployment via Helm
+All operators are deployed using Helm charts:
+
+```bash
+helm upgrade --install agnosticv-operator ./helm \
+  --namespace babylon-config \
+  --set image.tag=v1.12.0 \
+  --set deploy=true
+```
+
+=== Leader Election
+Operators support multiple replicas with leader election:
+
+```python
+@kopf.on.startup()
+async def configure_leader_election(settings):
+    settings.peering.name = "babylon-agnosticv-operator"
+    settings.peering.namespace = "babylon-config"
+```
+
+=== Graceful Shutdown
+Operators handle shutdown gracefully:
+
+```python
+@kopf.on.cleanup()
+async def cleanup_resources():
+    await finalize_pending_operations()
+    await close_external_connections()
+```
+
+== Development and Testing
+
+=== Local Development
+Each operator supports local development:
+
+```bash
+# Set up development environment
+odo dev --devfile devfile.yaml
+
+# Run tests
+ansible-playbook test/playbook.yaml
+```
+
+=== Testing Patterns
+Operators include comprehensive testing:
+
+* **Unit Tests**: Core logic validation
+* **Integration Tests**: Kubernetes API interaction
+* **End-to-End Tests**: Complete workflow validation
+
+=== Development Tools
+Common development tools and patterns:
+
+```python
+# Kopf framework for operator development
+import kopf
+
+# Kubernetes client libraries
+import kubernetes_asyncio
+
+# Structured logging
+import logging
+logger = logging.getLogger(__name__)
+
+# Metrics collection
+from prometheus_client import Counter, Histogram
+REQUEST_COUNT = Counter('operator_requests_total', 'Total requests')
+```
+
+## Operator-Specific Documentation
+
+Each operator has detailed documentation covering:
+
+* **Purpose and Scope**: What the operator manages
+* **Custom Resources**: CRD specifications and examples
+* **Configuration**: Helm values and environment variables
+* **Operations**: Deployment, scaling, and troubleshooting
+* **Development**: Local setup and testing procedures
+
+This modular operator architecture enables the Babylon Platform to manage complex workflows while maintaining clear separation of responsibilities and operational simplicity.

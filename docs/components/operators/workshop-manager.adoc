@@ -1,0 +1,532 @@
+= Workshop Manager
+
+== Overview
+
+The Workshop Manager is a Kubernetes operator that orchestrates the delivery of workshops and manages the assignment of users to workshop resources. It provides comprehensive capabilities for bulk provisioning, user management, and workshop lifecycle automation.
+
+== Purpose and Responsibilities
+
+=== Primary Functions
+* **Workshop Orchestration**: Manage complete workshop lifecycles from creation to cleanup
+* **Bulk Provisioning**: Coordinate provisioning of multiple environments for workshop delivery
+* **User Assignment**: Dynamically assign participants to available workshop resources
+* **Resource Coordination**: Interface with Poolboy for resource allocation and management
+* **Lab Interface Integration**: Coordinate with Lab UI Manager for user-specific interfaces
+
+=== Key Value Propositions
+* **Scalable Workshop Delivery**: Support workshops from 1 to 1000+ participants
+* **Automated Resource Management**: Handle complex provisioning workflows automatically
+* **Flexible User Assignment**: Support both pre-assigned and open registration models
+* **Integration with Platform**: Seamless integration with other Babylon components
+
+== Architecture
+
+=== Core Components
+
+==== Workshop Controller
+Manages Workshop custom resources and their lifecycle:
+
+```python
+@kopf.on.create('babylon.gpte.redhat.com', 'v1', 'workshops')
+async def create_workshop(spec, name, namespace, **kwargs):
+    """Handle Workshop creation"""
+    workshop = Workshop.load(**kwargs)
+
+    # Validate workshop configuration
+    await workshop.validate_configuration()
+
+    # Set up workshop infrastructure
+    await workshop.initialize_workshop()
+
+    # Create initial user assignments if specified
+    if workshop.has_predefined_users():
+        await workshop.create_user_assignments()
+
+    return {'status': 'initialized'}
+```
+
+==== Workshop Provision Controller
+Handles bulk provisioning of workshop environments:
+
+```python
+@kopf.on.create('babylon.gpte.redhat.com', 'v1', 'workshopprovisions')
+async def create_workshop_provision(spec, name, namespace, **kwargs):
+    """Handle WorkshopProvision creation"""
+    provision = WorkshopProvision.load(**kwargs)
+
+    # Calculate required resources
+    total_count = provision.count
+    concurrency = provision.concurrency
+
+    # Create resource claims in batches
+    for batch in range(0, total_count, concurrency):
+        batch_size = min(concurrency, total_count - batch)
+        await provision.create_resource_batch(batch, batch_size)
+
+        # Delay between batches
+        await asyncio.sleep(provision.start_delay)
+
+    return {'status': 'provisioning'}
+```
+
+==== User Assignment Controller
+Manages user-to-resource assignments:
+
+```python
+@kopf.on.create('babylon.gpte.redhat.com', 'v1', 'workshopuserassignments')
+async def create_user_assignment(spec, name, namespace, **kwargs):
+    """Handle WorkshopUserAssignment creation"""
+    assignment = WorkshopUserAssignment.load(**kwargs)
+
+    # Validate user assignment
+    await assignment.validate_user()
+
+    # Find or create resource claim
+    resource_claim = await assignment.get_or_create_resource_claim()
+
+    # Set up lab interface if needed
+    if assignment.needs_lab_interface():
+        await assignment.create_lab_interface()
+
+    return {'status': 'assigned'}
+```
+
+=== Resource Model
+
+==== Workshop Custom Resource
+Defines workshop configuration and settings:
+
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: Workshop
+metadata:
+  name: openshift-fundamentals
+  namespace: user-instructor-example
+spec:
+  # Display information
+  displayName: "OpenShift Fundamentals Workshop"
+  description: "Introduction to OpenShift for developers"
+
+  # Access configuration
+  accessPassword: "workshop123"
+  openRegistration: true
+
+  # Workshop settings
+  multiuserServices: false
+  provisionDisabled: false
+
+  # Lifespan configuration
+  lifespan:
+    start: "2023-06-01T09:00:00Z"
+    end: "2023-06-01T17:00:00Z"
+    maximum: 8h
+    relativeMaximum: 24h
+
+  # Action scheduling
+  actionSchedule:
+    start: "2023-06-01T08:00:00Z"
+    stop: "2023-06-01T18:00:00Z"
+
+  # Lab interface settings
+  labUserInterface:
+    redirect: true
+```
+
+==== WorkshopProvision Custom Resource
+Configures bulk provisioning for workshops:
+
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: WorkshopProvision
+metadata:
+  name: openshift-workshop-provision
+  namespace: user-instructor-example
+spec:
+  # Workshop reference
+  workshopName: openshift-fundamentals
+
+  # Catalog item configuration
+  catalogItem:
+    name: openshift-workshop
+    namespace: babylon-catalog-rhpds
+
+  # Provisioning settings
+  count: 20
+  concurrency: 5
+  startDelay: 30
+  enableResourcePools: true
+
+  # Lifespan settings
+  lifespan:
+    start: "2023-06-01T08:00:00Z"
+    end: "2023-06-01T18:00:00Z"
+
+  # Parameters for catalog item
+  parameters:
+    openshift_version: "4.12"
+    user_count: 1
+    aws_region: us-east-1
+```
+
+==== WorkshopUserAssignment Custom Resource
+Manages individual user assignments:
+
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: WorkshopUserAssignment
+metadata:
+  name: workshop-user-001
+  namespace: user-instructor-example
+spec:
+  # Workshop reference
+  workshopName: openshift-fundamentals
+
+  # Resource claim reference
+  resourceClaimName: workshop-provision-001
+
+  # User assignment
+  assignment:
+    email: participant@example.com
+
+  # User name for lab
+  userName: user001
+
+  # Lab interface configuration
+  labUserInterface:
+    redirect: true
+    url: https://bookbag-user001.apps.cluster.example.com
+```
+
+== Configuration
+
+=== Helm Values
+Key configuration options for Workshop Manager:
+
+```yaml
+workshopManager:
+  # Deployment control
+  deploy: true
+
+  # Image configuration
+  image:
+    repository: quay.io/rhpds/babylon-workshop-manager
+    tag: v0.9.3
+    pullPolicy: IfNotPresent
+
+  # Namespace configuration
+  namespace:
+    create: true
+    name: babylon-workshop-manager
+
+  # Resource limits
+  resources:
+    requests:
+      cpu: 200m
+      memory: 1Gi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+  # Workshop defaults
+  defaultSettings:
+    maxParticipants: 100
+    defaultLifespan: 8h
+    maxLifespan: 24h
+    provisionConcurrency: 10
+    startDelay: 10
+
+  # User assignment settings
+  userAssignment:
+    emailValidation: true
+    requireUniqueEmails: true
+    autoAssignment: true
+```
+
+=== Environment Variables
+
+```bash
+# Babylon domain configuration
+BABYLON_DOMAIN=babylon.gpte.redhat.com
+BABYLON_API_VERSION=v1
+
+# Workshop configuration
+DEFAULT_LIFESPAN=8h
+MAX_LIFESPAN=24h
+PROVISION_CONCURRENCY=10
+START_DELAY=10
+
+# User assignment configuration
+EMAIL_VALIDATION=true
+REQUIRE_UNIQUE_EMAILS=true
+AUTO_ASSIGNMENT=true
+
+# Kopf operator configuration
+KOPF_OPTIONS="--log-format=json"
+KOPF_PEERING=babylon-workshop-manager
+```
+
+== Operations
+
+=== Deployment
+
+==== Prerequisites
+* OpenShift/Kubernetes cluster with Babylon platform deployed
+* Poolboy operator installed and configured
+* Appropriate RBAC permissions for workshop management
+
+==== Installation via Helm
+```bash
+# Install Workshop Manager
+helm upgrade --install workshop-manager ./helm \
+  --namespace babylon-workshop-manager \
+  --create-namespace \
+  --set workshopManager.deploy=true \
+  --set workshopManager.image.tag=v0.9.3
+```
+
+==== Post-Installation Verification
+```bash
+# Check deployment status
+oc get deployment babylon-workshop-manager -n babylon-workshop-manager
+
+# Verify CRDs are available
+oc get crd workshops.babylon.gpte.redhat.com
+oc get crd workshopprovisions.babylon.gpte.redhat.com
+oc get crd workshopuserassignments.babylon.gpte.redhat.com
+
+# Check operator logs
+oc logs deployment/babylon-workshop-manager -n babylon-workshop-manager
+```
+
+=== Monitoring
+
+==== Key Metrics
+```prometheus
+# Workshop metrics
+workshop_manager_workshops_total{status="active"}
+workshop_manager_workshops_total{status="completed"}
+
+# Provision metrics
+workshop_manager_provisions_total{status="successful"}
+workshop_manager_provisions_total{status="failed"}
+workshop_manager_provision_duration_seconds
+
+# User assignment metrics
+workshop_manager_user_assignments_total{status="assigned"}
+workshop_manager_user_assignments_total{status="available"}
+
+# Resource metrics
+workshop_manager_resource_claims_total{status="ready"}
+workshop_manager_resource_claims_total{status="provisioning"}
+```
+
+==== Health Checks
+```bash
+# Check operator health
+curl http://localhost:8080/health/live
+curl http://localhost:8080/health/ready
+
+# Check metrics endpoint
+curl http://localhost:8080/metrics | grep workshop_manager
+```
+
+=== Troubleshooting
+
+==== Common Issues
+
+===== Workshop Provision Failures
+```bash
+# Check WorkshopProvision status
+oc get workshopprovisions -A
+oc describe workshopprovision <provision-name>
+
+# Check resource claim creation
+oc get resourceclaims -A | grep workshop
+
+# Check operator logs for provision errors
+oc logs deployment/babylon-workshop-manager -n babylon-workshop-manager | grep provision
+```
+
+===== User Assignment Issues
+```bash
+# Check user assignments
+oc get workshopuserassignments -A
+oc describe workshopuserassignment <assignment-name>
+
+# Check for duplicate email assignments
+oc get workshopuserassignments -o jsonpath='{.items[*].spec.assignment.email}' | sort | uniq -d
+
+# Verify user assignment logic
+oc logs deployment/babylon-workshop-manager -n babylon-workshop-manager | grep assignment
+```
+
+===== Resource Claim Issues
+```bash
+# Check resource claim status
+oc get resourceclaims -A | grep workshop
+oc describe resourceclaim <claim-name>
+
+# Check Poolboy operator status
+oc logs deployment/poolboy -n poolboy
+
+# Verify resource provider availability
+oc get resourceproviders -n poolboy
+```
+
+==== Recovery Procedures
+
+===== Reset Workshop Provision
+```bash
+# Delete failed workshop provision
+oc delete workshopprovision <provision-name>
+
+# Clean up orphaned resource claims
+oc delete resourceclaims -l babylon.gpte.redhat.com/workshopProvision=<provision-name>
+
+# Recreate workshop provision
+oc apply -f workshop-provision.yaml
+```
+
+===== Reassign User
+```bash
+# Remove current assignment
+oc delete workshopuserassignment <assignment-name>
+
+# Find available resource
+oc get workshopuserassignments -l workshopName=<workshop-name> \
+  --field-selector=spec.assignment.email=""
+
+# Create new assignment
+oc apply -f new-user-assignment.yaml
+```
+
+== Workshop Workflows
+
+=== Creating a Workshop
+
+==== Step 1: Define Workshop
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: Workshop
+metadata:
+  name: my-workshop
+spec:
+  displayName: "My Workshop"
+  description: "Workshop description"
+  openRegistration: true
+  lifespan:
+    end: "2023-12-31T17:00:00Z"
+```
+
+==== Step 2: Create Workshop Provision
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: WorkshopProvision
+metadata:
+  name: my-workshop-provision
+spec:
+  workshopName: my-workshop
+  catalogItem:
+    name: workshop-catalog-item
+    namespace: babylon-catalog
+  count: 20
+  concurrency: 5
+```
+
+==== Step 3: Monitor Progress
+```bash
+# Watch provision progress
+oc get workshopprovisions my-workshop-provision -w
+
+# Check user assignments
+oc get workshopuserassignments -l workshopName=my-workshop
+```
+
+=== Managing Workshop Users
+
+==== Pre-assign Users
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: WorkshopUserAssignment
+metadata:
+  name: user-assignment-001
+spec:
+  workshopName: my-workshop
+  resourceClaimName: provision-001
+  assignment:
+    email: user@example.com
+  userName: user001
+```
+
+==== Open Registration Workflow
+```bash
+# Users access workshop URL
+# System automatically assigns available resources
+# Lab interfaces are created dynamically
+```
+
+=== Workshop Lifecycle Management
+
+==== Start Workshop
+```bash
+# Update workshop action schedule
+oc patch workshop my-workshop --type=merge -p '{
+  "spec": {
+    "actionSchedule": {
+      "start": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
+    }
+  }
+}'
+```
+
+==== Stop Workshop
+```bash
+# Update workshop action schedule
+oc patch workshop my-workshop --type=merge -p '{
+  "spec": {
+    "actionSchedule": {
+      "stop": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
+    }
+  }
+}'
+```
+
+==== Extend Workshop
+```bash
+# Extend workshop lifespan
+oc patch workshop my-workshop --type=merge -p '{
+  "spec": {
+    "lifespan": {
+      "end": "2023-12-31T20:00:00Z"
+    }
+  }
+}'
+```
+
+== Best Practices
+
+=== Workshop Design
+* Plan workshop capacity based on expected attendance
+* Use resource pools for faster provisioning
+* Configure appropriate lifespans for workshop duration
+* Test workshop provisions in staging environment
+
+=== User Management
+* Validate email addresses for assignments
+* Implement unique email constraints
+* Provide clear access instructions to participants
+* Monitor user assignment success rates
+
+=== Resource Optimization
+* Use bulk provisioning for large workshops
+* Configure appropriate concurrency limits
+* Plan provision timing to avoid resource conflicts
+* Monitor resource utilization during workshops
+
+=== Operational Excellence
+* Monitor workshop provision success rates
+* Implement alerting for provision failures
+* Maintain workshop templates for common scenarios
+* Document troubleshooting procedures for instructors
+
+The Workshop Manager provides comprehensive capabilities for delivering scalable, automated workshops while maintaining operational simplicity and reliability.

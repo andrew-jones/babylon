@@ -1,0 +1,650 @@
+= Security Model
+
+== Overview
+
+The Babylon Platform implements a comprehensive security model designed for enterprise environments. Security is built into every layer of the architecture, from network communications to resource access controls. This document outlines the security principles, implementation details, and best practices for maintaining a secure Babylon deployment.
+
+== Security Principles
+
+=== Defense in Depth
+Multiple layers of security controls protect the platform:
+
+* **Network Security**: Network policies and service mesh for traffic control
+* **Identity and Access Management**: Strong authentication and authorization
+* **Resource Isolation**: Namespace-based multi-tenancy
+* **Data Protection**: Encryption at rest and in transit
+* **Audit and Compliance**: Comprehensive logging and monitoring
+
+=== Least Privilege Access
+All components operate with minimal required permissions:
+
+* **Service Accounts**: Component-specific service accounts with limited scope
+* **RBAC Rules**: Granular permissions for specific operations
+* **Namespace Boundaries**: Clear separation between tenants and environments
+* **Secret Access**: Restricted access to sensitive configuration
+
+=== Zero Trust Network
+Network communications follow zero trust principles:
+
+* **Mutual TLS**: Service-to-service communication encryption
+* **Network Policies**: Default deny with explicit allow rules
+* **Service Mesh**: Advanced traffic management and security policies
+* **External Endpoints**: Secured external integrations
+
+== Authentication and Authorization
+
+=== User Authentication
+
+==== OpenShift OAuth Integration
+Babylon leverages OpenShift's OAuth server for user authentication:
+
+```yaml
+apiVersion: config.openshift.io/v1
+kind: OAuth
+metadata:
+  name: cluster
+spec:
+  identityProviders:
+  - name: ldap
+    type: LDAP
+    ldap:
+      url: ldaps://ldap.example.com:636
+      bindDN: uid=svc-babylon,ou=services,dc=example,dc=com
+      bindPassword:
+        name: ldap-bind-password
+      insecure: false
+      ca:
+        name: ldap-ca
+```
+
+==== Identity Providers
+Supported identity providers include:
+
+* **LDAP/Active Directory**: Enterprise directory integration
+* **GitHub**: GitHub organization-based authentication
+* **Google**: Google Workspace integration
+* **OIDC**: Generic OpenID Connect providers
+* **HTPasswd**: Local user accounts for development
+
+=== Service Account Architecture
+
+==== Component Service Accounts
+Each Babylon component uses dedicated service accounts:
+
+```yaml
+# AgnosticV Operator Service Account
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: babylon-agnosticv-operator
+  namespace: babylon-config
+---
+# Workshop Manager Service Account
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: babylon-workshop-manager
+  namespace: babylon-workshop-manager
+---
+# Catalog API Service Account
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: babylon-catalog-api
+  namespace: babylon-catalog-rhpds
+```
+
+==== Cross-Namespace Access
+Service accounts requiring cross-namespace access use specific cluster roles:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: babylon-agnosticv-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: babylon-agnosticv-operator
+subjects:
+- kind: ServiceAccount
+  name: babylon-agnosticv-operator
+  namespace: babylon-config
+```
+
+=== Role-Based Access Control (RBAC)
+
+==== Cluster-Level Roles
+
+===== babylon-cluster-admin
+Full administrative access to Babylon resources:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: babylon-cluster-admin
+rules:
+- apiGroups: ["babylon.gpte.redhat.com"]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["poolboy.gpte.redhat.com"]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["anarchy.gpte.redhat.com"]
+  resources: ["*"]
+  verbs: ["*"]
+```
+
+===== babylon-cluster-reader
+Read-only access for monitoring and auditing:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: babylon-cluster-reader
+rules:
+- apiGroups: ["babylon.gpte.redhat.com"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["poolboy.gpte.redhat.com"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+```
+
+===== babylon-user-catalog-access
+End-user catalog access permissions:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: babylon-user-catalog-access
+rules:
+- apiGroups: ["babylon.gpte.redhat.com"]
+  resources: ["catalogitems"]
+  verbs: ["get", "list"]
+- apiGroups: ["poolboy.gpte.redhat.com"]
+  resources: ["resourceclaims"]
+  verbs: ["create", "get", "list", "watch", "update", "patch"]
+  resourceNames: []
+```
+
+==== Namespace-Level Roles
+
+===== Workshop Instructor Role
+Permissions for workshop creators and instructors:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: user-instructor-namespace
+  name: workshop-instructor
+rules:
+- apiGroups: ["babylon.gpte.redhat.com"]
+  resources: ["workshops", "workshopprovisions"]
+  verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+- apiGroups: ["poolboy.gpte.redhat.com"]
+  resources: ["resourceclaims"]
+  verbs: ["get", "list", "watch"]
+```
+
+===== Workshop Participant Role
+Limited permissions for workshop participants:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: user-participant-namespace
+  name: workshop-participant
+rules:
+- apiGroups: ["poolboy.gpte.redhat.com"]
+  resources: ["resourceclaims"]
+  verbs: ["get", "list", "watch"]
+  resourceNames: ["user-resource-claim"]
+```
+
+==== Dynamic RBAC
+The platform supports dynamic RBAC for workshop scenarios:
+
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: Workshop
+metadata:
+  name: openshift-workshop
+spec:
+  accessPassword: "workshop-secret"
+  userRoleBinding:
+    roleRef:
+      apiGroup: rbac.authorization.k8s.io
+      kind: ClusterRole
+      name: babylon-user-catalog-access
+    subjects:
+    - kind: User
+      name: "{{user_email}}"
+```
+
+== Secrets Management
+
+=== Secret Types and Usage
+
+==== External System Credentials
+
+===== Ansible Tower Integration
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: babylon-tower
+  namespace: anarchy-operator
+type: Opaque
+data:
+  hostname: dG93ZXIuZXhhbXBsZS5jb20= # base64: tower.example.com
+  user: YWRtaW4= # base64: admin
+  password: cGFzc3dvcmQ= # base64: password
+```
+
+===== AWS Credentials
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aws-credentials
+  namespace: anarchy-operator
+type: Opaque
+data:
+  aws_access_key_id: QUtJQUlPU0ZPRE5ON0VYQU1QTEU=
+  aws_secret_access_key: d0phbFJYVXRuRkVNSS9LN01ERU5HLzFiUUNMYUJQZkVYQU1QTEVLRVK=
+```
+
+===== Git Repository Access
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: agnosticv-git-ssh-key
+  namespace: babylon-config
+type: kubernetes.io/ssh-auth
+data:
+  ssh-privatekey: |
+    LS0tLS1CRUdJTiBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0=
+```
+
+==== Database Credentials
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: database
+  namespace: babylon-admin
+type: Opaque
+data:
+  hostname: cG9zdGdyZXMuZXhhbXBsZS5jb20=
+  username: YmFieWxvbg==
+  password: c2VjdXJlUGFzc3dvcmQ=
+  database: YmFieWxvbl9hZG1pbg==
+```
+
+==== Notification Configuration
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: smtp-config
+  namespace: babylon-notifier
+type: Opaque
+data:
+  smtp_host: c210cC5leGFtcGxlLmNvbQ==
+  smtp_port: NTg3
+  smtp_username: bm90aWZpZXI=
+  smtp_password: c210cFBhc3N3b3Jk
+  tls_cert: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0t
+  tls_key: LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0t
+```
+
+=== Secret Rotation and Management
+
+==== Automated Secret Rotation
+Secrets are rotated using GitOps workflows:
+
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: secret-rotation
+  namespace: babylon-config
+spec:
+  schedule: "0 2 * * 0" # Weekly on Sunday at 2 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: secret-rotator
+            image: quay.io/babylon/secret-rotator:latest
+            env:
+            - name: SECRET_PROVIDER
+              value: "vault"
+            - name: VAULT_ADDR
+              value: "https://vault.example.com"
+```
+
+==== Secret Backup and Recovery
+Secrets are backed up to secure external storage:
+
+```yaml
+apiVersion: backup.babylon.gpte.redhat.com/v1
+kind: SecretBackup
+metadata:
+  name: weekly-secret-backup
+spec:
+  schedule: "0 3 * * 0"
+  destination:
+    type: s3
+    bucket: babylon-secret-backup
+    encryption:
+      kms: arn:aws:kms:us-east-1:123456789:key/12345678-1234-1234-1234-123456789012
+```
+
+== Network Security
+
+=== Network Policies
+
+==== Default Deny Policy
+All namespaces have default deny policies:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: babylon-config
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+```
+
+==== Component-Specific Policies
+Each component has specific network policies:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: catalog-api-policy
+  namespace: babylon-catalog-rhpds
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: catalog-api
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: babylon-catalog-rhpds
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: oauth-proxy
+    ports:
+    - protocol: TCP
+      port: 8080
+  egress:
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443 # Kubernetes API
+    - protocol: TCP
+      port: 6443 # Kubernetes API
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53 # DNS
+```
+
+=== Service Mesh Integration
+
+==== Istio Service Mesh
+Optional Istio integration for advanced security:
+
+```yaml
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+metadata:
+  name: babylon-service-mesh
+spec:
+  values:
+    global:
+      meshID: babylon
+      network: babylon-network
+  components:
+    pilot:
+      k8s:
+        resources:
+          requests:
+            cpu: 500m
+            memory: 2048Mi
+```
+
+==== Mutual TLS Configuration
+```yaml
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: babylon-config
+spec:
+  mtls:
+    mode: STRICT
+```
+
+== Data Encryption
+
+=== Encryption at Rest
+
+==== etcd Encryption
+Kubernetes secrets encrypted in etcd:
+
+```yaml
+apiVersion: config.openshift.io/v1
+kind: APIServer
+metadata:
+  name: cluster
+spec:
+  encryption:
+    type: aes-cbc
+```
+
+==== Database Encryption
+PostgreSQL databases use encryption:
+
+```sql
+-- Enable transparent data encryption
+ALTER DATABASE babylon_admin SET default_table_access_method = 'heap';
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+```
+
+=== Encryption in Transit
+
+==== TLS Configuration
+All external communications use TLS:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tls-certificate
+  namespace: babylon-catalog-rhpds
+type: kubernetes.io/tls
+data:
+  tls.crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0t
+  tls.key: LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0t
+```
+
+==== Certificate Management
+Certificates managed via cert-manager:
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: babylon-catalog-tls
+  namespace: babylon-catalog-rhpds
+spec:
+  secretName: babylon-catalog-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+  - catalog.babylon.example.com
+```
+
+== Audit and Compliance
+
+=== Audit Logging
+
+==== Kubernetes Audit Policy
+```yaml
+apiVersion: audit.k8s.io/v1
+kind: Policy
+rules:
+- level: Metadata
+  namespaces: ["babylon-config", "babylon-admin"]
+  resources:
+  - group: "babylon.gpte.redhat.com"
+    resources: ["*"]
+- level: RequestResponse
+  resources:
+  - group: ""
+    resources: ["secrets"]
+```
+
+==== Application Audit Logs
+```json
+{
+  "timestamp": "2023-01-01T12:00:00Z",
+  "user": "instructor@example.com",
+  "action": "create_workshop",
+  "resource": "workshops/openshift-workshop",
+  "namespace": "user-instructor",
+  "result": "success",
+  "ip_address": "192.168.1.100"
+}
+```
+
+=== Compliance Frameworks
+
+==== SOC 2 Controls
+* **Access Controls**: RBAC implementation
+* **Encryption**: Data protection at rest and in transit
+* **Monitoring**: Comprehensive audit logging
+* **Change Management**: GitOps workflows
+
+==== GDPR Compliance
+* **Data Minimization**: Limited personal data collection
+* **Right to Erasure**: User data deletion capabilities
+* **Data Portability**: User data export functionality
+* **Privacy by Design**: Built-in privacy protections
+
+== Security Monitoring
+
+=== Security Metrics
+Key security metrics monitored:
+
+```prometheus
+# Failed authentication attempts
+babylon_auth_failures_total{component="catalog-api"}
+
+# Unauthorized resource access attempts
+babylon_rbac_denials_total{resource="resourceclaims"}
+
+# Secret access events
+babylon_secret_access_total{secret_name="aws-credentials"}
+
+# Certificate expiration warnings
+babylon_cert_expiry_days{certificate="catalog-tls"}
+```
+
+=== Threat Detection
+Automated threat detection rules:
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: babylon-security-alerts
+spec:
+  groups:
+  - name: security
+    rules:
+    - alert: HighFailedAuthRate
+      expr: rate(babylon_auth_failures_total[5m]) > 0.1
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High authentication failure rate detected"
+```
+
+== Security Best Practices
+
+=== Development Security
+
+==== Secure Coding Guidelines
+* **Input Validation**: All user inputs validated and sanitized
+* **SQL Injection Prevention**: Parameterized queries only
+* **XSS Protection**: Output encoding and Content Security Policy
+* **Dependency Scanning**: Regular vulnerability scans of dependencies
+
+==== Container Security
+```dockerfile
+# Use minimal base images
+FROM registry.redhat.io/ubi8/ubi-minimal:latest
+
+# Run as non-root user
+RUN useradd -r -u 1001 babylon
+USER 1001
+
+# Set security options
+LABEL security.alpha.kubernetes.io/seccomp-profiles=docker/default
+LABEL security.alpha.kubernetes.io/apparmor-profiles=runtime/default
+```
+
+=== Operational Security
+
+==== Regular Security Assessments
+* **Penetration Testing**: Annual third-party security assessments
+* **Vulnerability Scanning**: Automated daily scans
+* **Code Reviews**: Security-focused code review process
+* **Access Reviews**: Quarterly review of user permissions
+
+==== Incident Response
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: incident-response-plan
+data:
+  severity-1: |
+    1. Immediate containment
+    2. Notify security team
+    3. Preserve evidence
+    4. Begin investigation
+  severity-2: |
+    1. Assess impact
+    2. Apply mitigations
+    3. Schedule remediation
+    4. Update security policies
+```
+
+This comprehensive security model ensures that the Babylon Platform meets enterprise security requirements while maintaining operational efficiency and user experience.

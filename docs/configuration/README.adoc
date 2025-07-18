@@ -1,0 +1,1135 @@
+= Configuration Reference
+
+== Overview
+
+This document provides comprehensive configuration reference for the Babylon Platform, including Helm values, environment variables, custom resource definitions, and integration templates. Use this reference to customize platform behavior for your specific requirements.
+
+== Helm Values Reference
+
+=== Global Configuration
+
+```yaml
+# Global platform settings
+ingressDomain: babylon.example.com  # Required: Base domain for all services
+
+# Cluster configuration
+cluster:
+  domain: cluster.local            # Kubernetes cluster domain
+  type: openshift                  # openshift or kubernetes
+  version: "4.12"                  # Cluster version for compatibility
+
+# Common image settings
+image:
+  registry: quay.io               # Default image registry
+  pullPolicy: IfNotPresent        # Image pull policy
+  pullSecrets: []                 # Global image pull secrets
+
+# Resource defaults
+resources:
+  default:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+```
+
+=== AgnosticV Operator Configuration
+
+```yaml
+agnosticv:
+  # Deployment control
+  deploy: true                     # Enable/disable operator deployment
+
+  # Operator configuration
+  operator:
+    image:
+      repository: quay.io/rhpds/babylon-agnosticv-operator
+      tag: v1.12.0
+      pullPolicy: IfNotPresent
+    replicaCount: 1                # Number of operator replicas
+    resources:
+      requests:
+        cpu: 500m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 512Mi
+
+    # Leader election settings
+    leaderElection:
+      enabled: true
+      leaseDuration: 15s
+      renewDeadline: 10s
+      retryPeriod: 2s
+
+  # API configuration
+  api:
+    group: gpte.redhat.com         # Custom resource API group
+    version: v1                    # API version
+
+  # Repository configurations
+  repositories:
+    example-repo:
+      url: git@github.com:example/agnosticv.git
+      ref: main                    # Git reference (branch/tag/commit)
+      contextDir: ""               # Subdirectory within repository
+      sshKey: agnosticv-ssh-key    # Secret name for SSH key
+
+      # GitHub integration
+      gitHub:
+        token: github-token        # GitHub access token secret
+        preloadPullRequests:
+          mode: override           # override, append, or disabled
+          maxAge: 7d              # Maximum age for PR preloading
+
+      # Catalog URL override
+      catalogUrl: https://custom.catalog.example.com
+
+      # Ansible configuration
+      babylonAnarchyRoles:
+      - name: babylon_anarchy_governor
+        src: https://github.com/rhpds/babylon_anarchy_governor.git
+        version: v0.30.3
+
+      babylonAnarchyCollections:
+      - name: community.general
+        version: ">=1.0.0"
+
+  # Execution environment configuration
+  executionEnvironmentAllowList:
+  - image: ^registry.redhat.io/    # Allow Red Hat registry images
+  - image: ^quay.io/agnosticd/ee-  # Allow AgnosticD execution environments
+  - name: ^Default execution environment$  # Allow specific named environments
+
+  # Repository polling interval
+  pollingInterval: 1m
+
+  # Resource quotas
+  resources:
+    requests:
+      cpu: 500m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+```
+
+=== Anarchy Operator Configuration
+
+```yaml
+anarchy:
+  # API configuration
+  api:
+    group: anarchy.gpte.redhat.com
+    version: v1
+
+  # Namespace configurations
+  namespaces:
+  - name: babylon-anarchy
+    profile: production
+
+  # Namespace profiles
+  namespaceProfiles:
+    development:
+      consecutiveFailureLimit: 3
+      maxReplicas: 3
+      minReplicas: 1
+      resources:
+        requests:
+          cpu: 250m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+      runLimit: 50
+      scaleUpDelay: 2m
+      scaleUpThreshold: 5
+      scalingCheckInterval: 30s
+
+    production:
+      consecutiveFailureLimit: 10
+      maxReplicas: 10
+      minReplicas: 1
+      resources:
+        requests:
+          cpu: 500m
+          memory: 512Mi
+        limits:
+          cpu: "1"
+          memory: "1Gi"
+      runLimit: 500
+      scaleUpDelay: 5m
+      scaleUpThreshold: 15
+      scalingCheckInterval: 1m
+
+  # Ansible roles configuration
+  ansibleRoles:
+    pre: []                        # Roles to install before main roles
+    sources:
+      babylon_anarchy_governor:
+        src: https://github.com/rhpds/babylon_anarchy_governor.git
+        version: v0.30.3
+    post: []                       # Roles to install after main roles
+```
+
+=== Catalog Configuration
+
+```yaml
+catalog:
+  # API configuration
+  api:
+    group: babylon.gpte.redhat.com
+    version: v1
+
+  # Default values for all catalog interfaces
+  defaults:
+    # API configuration
+    api:
+      image:
+        repository: quay.io/redhat-gpte/babylon-catalog-api
+        tag: v1.1.1
+        pullPolicy: IfNotPresent
+      loggingLevel: INFO
+      replicaCount: 1
+      resources:
+        requests:
+          cpu: 500m
+          memory: "2Gi"
+        limits:
+          cpu: "2"
+          memory: "2Gi"
+      responseCacheCleanInterval: 60  # Seconds
+
+    # OAuth proxy configuration
+    oauthProxy:
+      image:
+        repository: registry.redhat.io/openshift4/ose-oauth-proxy
+        tag: v4.12
+        pullPolicy: Always
+      replicaCount: 1
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: "1"
+          memory: 256Mi
+
+    # Redis cache configuration
+    redis:
+      image:
+        repository: registry.redhat.io/rhel9/redis-6
+        tag: 1-124
+        pullPolicy: IfNotPresent
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: "1"
+          memory: 256Mi
+      # Persistence configuration
+      persistence:
+        enabled: true
+        size: 1Gi
+        storageClass: ""
+
+    # Route configuration
+    route:
+      certManager:
+        enable: false              # Use cert-manager for TLS
+      certUtilsOperator:
+        enable: false              # Use cert-utils-operator
+      redirectToStatus: false      # Redirect to status page
+      tls:
+        termination: edge          # edge, passthrough, or reencrypt
+        insecureEdgeTerminationPolicy: Redirect
+
+    # UI configuration
+    ui:
+      image:
+        repository: quay.io/redhat-gpte/babylon-catalog-ui
+        tag: v0.33.17
+        pullPolicy: IfNotPresent
+      replicaCount: 1
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: "1"
+          memory: 256Mi
+
+    # Status page configuration
+    status:
+      image:
+        repository: quay.io/redhat-gpte/babylon-catalog-status
+        tag: v1.0.5
+        pullPolicy: IfNotPresent
+      replicaCount: 1
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: "1"
+          memory: 256Mi
+
+    # Default interface name
+    interfaceName: rhpds
+
+  # Interface-specific configurations
+  interfaces:
+    babylon-catalog-rhpds:
+      route:
+        host: catalog.babylon.example.com
+      ui:
+        branding:
+          title: "Red Hat Product Demo System"
+          logo: /assets/images/redhat-logo.svg
+
+    babylon-catalog-partners:
+      route:
+        host: partners.babylon.example.com
+      ui:
+        branding:
+          title: "Partner Demo Environment"
+          logo: /assets/images/partner-logo.svg
+      api:
+        loggingLevel: DEBUG
+```
+
+=== Workshop Manager Configuration
+
+```yaml
+workshopManager:
+  # Deployment control
+  deploy: true
+
+  # API configuration
+  api:
+    group: babylon.gpte.redhat.com
+    version: v1
+
+  # Image configuration
+  image:
+    repository: quay.io/rhpds/babylon-workshop-manager
+    tag: v0.9.3
+    pullPolicy: IfNotPresent
+
+  # Namespace configuration
+  namespace:
+    create: true
+    name: babylon-workshop-manager
+
+  # Resource configuration
+  resources:
+    requests:
+      cpu: 200m
+      memory: 1Gi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+  # Scaling configuration
+  replicaCount: 1
+
+  # Workshop configuration
+  defaultWorkshopSettings:
+    maxParticipants: 100           # Default maximum participants
+    defaultLifespan: 8h           # Default workshop lifespan
+    maxLifespan: 24h              # Maximum allowed lifespan
+    provisionConcurrency: 10      # Maximum concurrent provisions
+    startDelay: 10                # Seconds between provision starts
+
+  # User assignment configuration
+  userAssignment:
+    emailValidation: true         # Validate email addresses
+    requireUniqueEmails: true     # Prevent duplicate email assignments
+    autoAssignment: true          # Enable automatic user assignment
+```
+
+=== Admin API Configuration
+
+```yaml
+admin:
+  # Deployment control
+  deploy: true
+
+  # Namespace configuration
+  namespace:
+    create: true
+    name: babylon-admin
+
+  # Image configuration
+  image:
+    repository: quay.io/redhat-gpte/babylon-admin
+    tag: v1.0.8
+    pullPolicy: IfNotPresent
+
+  # Scaling configuration
+  replicaCount: 1
+
+  # Resource configuration
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 256Mi
+
+  # Database configuration
+  db:
+    deploy: false                 # Deploy in-cluster database
+    secretName: database          # Secret with database credentials
+
+    # In-cluster database settings (if deploy: true)
+    postgres:
+      image:
+        repository: postgres
+        tag: "13"
+      persistence:
+        size: 10Gi
+        storageClass: ""
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          cpu: "1"
+          memory: 1Gi
+
+  # ServiceNow integration
+  servicenow:
+    deploy: true
+    workshopFormId: b48fe3cc870b2d508a51bbbf8bbb3576
+    secretName: servicenow         # Secret with ServiceNow credentials
+
+  # Route configuration
+  route:
+    host: admin.babylon.example.com
+    tls:
+      termination: edge
+```
+
+=== Ratings API Configuration
+
+```yaml
+ratings:
+  # Deployment control
+  deploy: true
+
+  # Namespace configuration
+  namespace:
+    create: true
+    name: babylon-ratings
+
+  # Scaling configuration
+  replicaCount: 2
+
+  # Image configuration
+  image:
+    repository: quay.io/redhat-gpte/babylon-ratings
+    tag: v1.0.11
+    pullPolicy: Always
+
+  # Resource configuration
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 256Mi
+
+  # Database configuration
+  db:
+    secretName: ratings-db        # Secret with database credentials
+    bitwardenSecret: reporting_database  # Bitwarden secret reference
+
+  # Babylon integration
+  babylon:
+    domain: babylon.gpte.redhat.com
+
+  # Route configuration
+  route:
+    host: ratings.babylon.example.com
+```
+
+=== Notifier Configuration
+
+```yaml
+notifier:
+  # Deployment control
+  deploy: false                   # Disabled by default
+
+  # Image configuration
+  image:
+    repository: quay.io/rhpds/babylon-notifier
+    tag: v0.9.1
+    pullPolicy: IfNotPresent
+
+  # Namespace configuration
+  namespace:
+    create: true
+    name: babylon-notifier
+
+  # Resource configuration
+  resources:
+    requests:
+      cpu: 100m
+      memory: 640Mi
+    limits:
+      cpu: "1"
+      memory: 640Mi
+
+  # Redis configuration
+  redis:
+    image:
+      repository: registry.redhat.io/rhel9/redis-6
+      tag: 1-124
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 256Mi
+
+    # Persistence configuration
+    persistence:
+      enabled: true
+      size: 1Gi
+      storageClass: ""
+
+    # Redis password
+    password: ""                  # Leave empty to auto-generate
+
+  # SMTP configuration
+  smtp:
+    host: smtp.example.com
+    port: 587
+    tls: true
+    username: noreply@example.com
+    password: ""                  # Set via secret
+    from: "Red Hat Demo Platform <noreply@example.com>"
+    sender: "Red Hat Demo Platform"
+
+  # Email templates
+  templates:
+    provisionStarted:
+      subject: "Your lab environment is being provisioned"
+      enabled: true
+    provisionCompleted:
+      subject: "Your lab environment is ready"
+      enabled: true
+    provisionFailed:
+      subject: "Lab environment provisioning failed"
+      enabled: true
+    workshopReminder:
+      subject: "Workshop reminder: {{workshop.displayName}}"
+      enabled: false
+
+  # Notification rules
+  rules:
+    - name: provision-notifications
+      events:
+      - resourceclaim.status.phase
+      conditions:
+      - field: status.phase
+        operator: in
+        values: [Provisioning, Ready, Failed]
+      template: provision-{{status.phase | lower}}
+```
+
+=== Cost Tracker Configuration
+
+```yaml
+costTracker:
+  # Deployment control
+  deploy: false                   # Disabled by default
+
+  # Image configuration
+  image:
+    repository: quay.io/rhpds/babylon-cost-tracker
+    tag: v0.5.2
+    pullPolicy: IfNotPresent
+
+  # Namespace configuration
+  namespace:
+    create: true
+    name: babylon-cost-tracker
+
+  # Resource configuration
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+  # AWS configuration
+  aws:
+    secretName: aws-credentials   # Secret with AWS credentials
+    regions:                      # AWS regions to monitor
+    - us-east-1
+    - us-west-2
+    - eu-west-1
+
+    # Cost allocation tags
+    tags:
+    - babylon.gpte.redhat.com/guid
+    - babylon.gpte.redhat.com/user
+    - kubernetes.io/cluster/
+
+  # Sync configuration
+  sync:
+    interval: 1h                  # Cost data sync interval
+    retention: 90d                # How long to retain cost data
+
+  # Reporting configuration
+  reporting:
+    enabled: true
+    interval: 24h                 # Report generation interval
+    recipients:
+    - admin@example.com
+```
+
+=== Lab UI Manager Configuration
+
+```yaml
+labUIManager:
+  # Deployment control
+  deploy: true
+
+  # Image configuration
+  image:
+    repository: quay.io/rhpds/babylon-lab-ui-manager
+    tag: v0.8.1
+    pullPolicy: IfNotPresent
+
+  # Namespace configuration
+  namespace:
+    create: true
+    name: babylon-lab-ui-manager
+
+  # Resource configuration
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+  # Bookbag configuration
+  bookbag:
+    image:
+      repository: quay.io/redhat-gpte/bookbag
+      tag: latest
+      pullPolicy: Always
+
+    # Default bookbag settings
+    defaults:
+      vars:
+        cluster_subdomain: apps.cluster.example.com
+        console_url: https://console-openshift-console.apps.cluster.example.com
+        api_url: https://api.cluster.example.com:6443
+
+      # Resource limits for bookbag pods
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          cpu: "1"
+          memory: 1Gi
+```
+
+== Environment Variables Reference
+
+=== Common Environment Variables
+
+All components support these common environment variables:
+
+```bash
+# Kubernetes API configuration
+KUBECONFIG=/var/run/secrets/kubernetes.io/serviceaccount/config
+KUBERNETES_SERVICE_HOST=kubernetes.default.svc
+KUBERNETES_SERVICE_PORT=443
+
+# Component identification
+COMPONENT_NAME=agnosticv-operator
+NAMESPACE=babylon-config
+POD_NAME=${HOSTNAME}
+NODE_NAME=${NODE_NAME}
+
+# Logging configuration
+LOG_LEVEL=INFO                    # DEBUG, INFO, WARNING, ERROR
+LOG_FORMAT=json                   # json, text
+LOG_STRUCTURED=true               # Enable structured logging
+
+# Metrics configuration
+METRICS_PORT=8080                 # Prometheus metrics port
+METRICS_PATH=/metrics             # Metrics endpoint path
+
+# Health check configuration
+HEALTH_PORT=8080                  # Health check port
+LIVENESS_PATH=/health/live        # Liveness probe path
+READINESS_PATH=/health/ready      # Readiness probe path
+```
+
+=== AgnosticV Operator Environment Variables
+
+```bash
+# API group configuration
+AGNOSTICV_API_GROUP=gpte.redhat.com
+AGNOSTICV_VERSION=v1
+CATALOG_API_GROUP=babylon.gpte.redhat.com
+CATALOG_VERSION=v1
+
+# External system configuration
+ANARCHY_API_GROUP=anarchy.gpte.redhat.com
+ANARCHY_VERSION=v1
+RESOURCE_BROKER_API_GROUP=poolboy.gpte.redhat.com
+RESOURCE_BROKER_VERSION=v1
+RESOURCE_BROKER_NAMESPACE=poolboy
+
+# Repository configuration
+POLLING_INTERVAL=1m               # Repository polling interval
+GIT_SSH_COMMAND="ssh -i /path/to/key -o StrictHostKeyChecking=no"
+
+# Execution environment configuration
+EXECUTION_ENVIRONMENT_ALLOW_LIST='[{"image": "^registry.redhat.io/"}, ...]'
+DEFAULT_EXECUTION_ENVIRONMENT=Default execution environment
+
+# GitHub integration
+GITHUB_API_BASE_URL=https://api.github.com
+GITHUB_WEBHOOK_SECRET=""          # Webhook secret for validation
+```
+
+=== Catalog API Environment Variables
+
+```bash
+# Babylon configuration
+BABYLON_NAMESPACE=babylon-catalog-rhpds
+ENVIRONMENT=production            # development, staging, production
+INTERFACE_NAME=rhpds             # Interface identifier
+
+# Database configuration (if applicable)
+DB_HOSTNAME=postgres.example.com
+DB_PORT=5432
+DB_USERNAME=catalog
+DB_PASSWORD=""                    # Set via secret
+DB_NAME=catalog
+DB_SSL_MODE=require
+
+# Redis configuration
+REDIS_HOST=redis.babylon-catalog.svc.cluster.local
+REDIS_PORT=6379
+REDIS_PASSWORD=""                 # Set via secret
+REDIS_DB=0
+
+# Response caching
+CACHE_TTL=300                     # Cache TTL in seconds
+CACHE_MAX_SIZE=1000              # Maximum cache entries
+
+# Rate limiting
+RATE_LIMIT_REQUESTS=1000         # Requests per window
+RATE_LIMIT_WINDOW=3600           # Window size in seconds
+```
+
+=== Workshop Manager Environment Variables
+
+```bash
+# Babylon domain configuration
+BABYLON_DOMAIN=babylon.gpte.redhat.com
+BABYLON_API_VERSION=v1
+
+# Workshop configuration
+DEFAULT_LIFESPAN=8h              # Default workshop lifespan
+MAX_LIFESPAN=24h                 # Maximum workshop lifespan
+PROVISION_CONCURRENCY=10         # Max concurrent provisions
+START_DELAY=10                   # Seconds between provision starts
+
+# User assignment configuration
+EMAIL_VALIDATION=true            # Validate email addresses
+REQUIRE_UNIQUE_EMAILS=true       # Prevent duplicate emails
+AUTO_ASSIGNMENT=true             # Enable auto-assignment
+
+# Kopf configuration
+KOPF_OPTIONS="--log-format=json"
+KOPF_PEERING=babylon-workshop-manager
+```
+
+== Custom Resource Definitions (CRDs)
+
+=== CatalogItem Specification
+
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: CatalogItem
+metadata:
+  name: openshift-workshop
+  namespace: babylon-catalog-rhpds
+  labels:
+    babylon.gpte.redhat.com/category: workshops
+    babylon.gpte.redhat.com/provider: redhat
+spec:
+  # Display information
+  displayName: "OpenShift Container Platform Workshop"
+  description: "Hands-on OpenShift workshop environment"
+  icon: "data:image/svg+xml;base64,..."
+
+  # Categorization
+  category: workshops
+  keywords:
+  - openshift
+  - containers
+  - kubernetes
+
+  # Runtime information
+  runtime: 4h                     # Expected runtime
+  bookbag: true                   # Includes lab guide
+  multiuser: false                # Single-user environment
+
+  # Resource requirements
+  quota:
+    cpu: "8"
+    memory: 16Gi
+    storage: 100Gi
+
+  # Parameters
+  parameters:
+  - name: user_count
+    displayName: "Number of Users"
+    description: "Number of workshop participants"
+    type: integer
+    default: 1
+    minimum: 1
+    maximum: 50
+    required: true
+
+  - name: openshift_version
+    displayName: "OpenShift Version"
+    description: "OpenShift cluster version"
+    type: string
+    default: "4.12"
+    enum:
+    - "4.10"
+    - "4.11"
+    - "4.12"
+    required: true
+
+  # Resource templates
+  resources:
+  - name: openshift-cluster
+    template:
+      apiVersion: poolboy.gpte.redhat.com/v1
+      kind: ResourceClaim
+      spec:
+        resources:
+        - provider:
+            apiVersion: poolboy.gpte.redhat.com/v1
+            kind: ResourceProvider
+            name: openshift-cnv
+            namespace: poolboy
+          template:
+            spec:
+              vars:
+                user_count: "{{ user_count | default(1) }}"
+                openshift_version: "{{ openshift_version | default('4.12') }}"
+                aws_region: us-east-1
+
+status:
+  # Availability status
+  phase: Ready                    # Pending, Ready, Failed, Deprecated
+
+  # Usage statistics
+  usage:
+    totalOrders: 42
+    successfulOrders: 40
+    failedOrders: 2
+    averageProvisionTime: 1200    # Seconds
+
+  # Conditions
+  conditions:
+  - type: Ready
+    status: "True"
+    lastTransitionTime: "2023-01-01T12:00:00Z"
+    reason: ValidationSuccessful
+    message: "CatalogItem is ready for use"
+```
+
+=== Workshop Specification
+
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: Workshop
+metadata:
+  name: openshift-fundamentals
+  namespace: user-instructor
+spec:
+  # Display information
+  displayName: "OpenShift Fundamentals Workshop"
+  description: "Introduction to OpenShift for developers"
+
+  # Access control
+  accessPassword: "workshop123"   # Optional password protection
+  openRegistration: true          # Allow self-registration
+
+  # Workshop configuration
+  multiuserServices: false        # Workshop uses individual environments
+  provisionDisabled: false        # Allow provisioning new environments
+
+  # Participant configuration
+  userAssignments:
+  - assignment:
+      email: participant1@example.com
+    userName: user1
+  - assignment:
+      email: participant2@example.com
+    userName: user2
+
+  # Lab user interface
+  labUserInterface:
+    redirect: true                # Auto-redirect to lab interface
+
+  # Lifespan configuration
+  lifespan:
+    start: "2023-06-01T09:00:00Z"
+    end: "2023-06-01T17:00:00Z"
+    maximum: 8h                   # Maximum allowed extension
+    relativeMaximum: 24h          # Maximum relative to current time
+
+  # Action schedule
+  actionSchedule:
+    start: "2023-06-01T08:00:00Z" # When to start environments
+    stop: "2023-06-01T18:00:00Z"  # When to stop environments
+
+status:
+  # User count summary
+  userCount:
+    total: 20
+    assigned: 18
+    available: 2
+
+  # Provision summary
+  provisionCount:
+    ordered: 20
+    provisioning: 2
+    completed: 16
+    failed: 2
+
+  # User assignments
+  userAssignments:
+    user1:
+      assignment:
+        email: participant1@example.com
+      resourceClaimName: workshop-user1
+      labUserInterface:
+        url: https://bookbag-user1.apps.cluster.example.com
+```
+
+=== WorkshopProvision Specification
+
+```yaml
+apiVersion: babylon.gpte.redhat.com/v1
+kind: WorkshopProvision
+metadata:
+  name: openshift-workshop-provision
+  namespace: user-instructor
+spec:
+  # Workshop reference
+  workshopName: openshift-fundamentals
+
+  # Catalog item reference
+  catalogItem:
+    name: openshift-workshop
+    namespace: babylon-catalog-rhpds
+
+  # Provisioning configuration
+  count: 20                       # Number of environments to provision
+  concurrency: 5                  # Maximum concurrent provisions
+  startDelay: 30                  # Seconds between provisions
+
+  # Resource pools
+  enableResourcePools: true       # Use pre-provisioned pools
+
+  # Lifespan configuration
+  lifespan:
+    start: "2023-06-01T08:00:00Z"
+    end: "2023-06-01T18:00:00Z"
+
+  # Parameters for catalog item
+  parameters:
+    openshift_version: "4.12"
+    user_count: 1                 # Per-environment user count
+    aws_region: us-east-1
+
+  # Auto-detach configuration
+  autoDetach:
+    when: >-
+      ansible_job_id is defined and
+      (
+        anarchy_subject.status.towerJobs[ansible_job_id].status == "successful"
+        or anarchy_subject.status.towerJobs[ansible_job_id].status == "failed"
+      )
+
+status:
+  # Provision progress
+  provisions:
+    requested: 20
+    successful: 18
+    failed: 2
+    pending: 0
+
+  # Resource claims
+  resourceClaims:
+  - name: workshop-provision-001
+    status: Ready
+    userName: user001
+  - name: workshop-provision-002
+    status: Failed
+    userName: user002
+```
+
+== Integration Templates
+
+=== Ansible Tower/AAP Integration
+
+```yaml
+# Tower credentials secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: babylon-tower
+  namespace: anarchy-operator
+type: Opaque
+stringData:
+  hostname: tower.example.com
+  user: babylon-automation
+  password: secure-password
+  verify_ssl: "true"
+---
+# Tower project configuration
+apiVersion: anarchy.gpte.redhat.com/v1
+kind: AnarchyGovernor
+metadata:
+  name: babylon-tower-governor
+spec:
+  ansibleGalaxyRequirements:
+  - name: ansible.tower
+    version: ">=3.8.0"
+
+  vars:
+    tower_hostname: "{{ ansible_tower.hostname }}"
+    tower_username: "{{ ansible_tower.user }}"
+    tower_password: "{{ ansible_tower.password }}"
+    tower_verify_ssl: "{{ ansible_tower.verify_ssl | default(true) | bool }}"
+
+  actions:
+    provision:
+      playbooks:
+      - provision.yaml
+    destroy:
+      playbooks:
+      - destroy.yaml
+```
+
+=== AWS Integration
+
+```yaml
+# AWS credentials secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aws-credentials
+  namespace: anarchy-operator
+type: Opaque
+stringData:
+  aws_access_key_id: AKIAIOSFODNN7EXAMPLE
+  aws_secret_access_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+  aws_default_region: us-east-1
+---
+# Cost allocation tags
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aws-cost-allocation-tags
+  namespace: babylon-cost-tracker
+data:
+  tags.yaml: |
+    required_tags:
+    - babylon.gpte.redhat.com/guid
+    - babylon.gpte.redhat.com/user
+    - babylon.gpte.redhat.com/purpose
+
+    optional_tags:
+    - project
+    - cost-center
+    - environment
+
+    default_values:
+      purpose: training
+      environment: temporary
+```
+
+=== LDAP Integration
+
+```yaml
+# LDAP integration for OpenShift OAuth
+apiVersion: config.openshift.io/v1
+kind: OAuth
+metadata:
+  name: cluster
+spec:
+  identityProviders:
+  - name: babylon-ldap
+    type: LDAP
+    ldap:
+      url: ldaps://ldap.example.com:636
+      bindDN: uid=babylon-svc,ou=services,dc=example,dc=com
+      bindPassword:
+        name: ldap-bind-password
+      insecure: false
+      ca:
+        name: ldap-ca-bundle
+      attributes:
+        id:
+        - dn
+        preferredUsername:
+        - uid
+        name:
+        - cn
+        email:
+        - mail
+---
+# Group sync configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ldap-group-sync
+data:
+  sync.yaml: |
+    kind: LDAPSyncConfig
+    apiVersion: v1
+    url: ldaps://ldap.example.com:636
+    bindDN: uid=babylon-svc,ou=services,dc=example,dc=com
+    bindPassword:
+      file: /etc/ldap-secret/bindPassword
+    insecure: false
+    ca: /etc/ldap-ca/ca.crt
+
+    groupUIDNameMapping:
+      "cn=babylon-admin,ou=groups,dc=example,dc=com": babylon-admin
+      "cn=babylon-instructor,ou=groups,dc=example,dc=com": babylon-instructor
+      "cn=babylon-user,ou=groups,dc=example,dc=com": babylon-user
+```
+
+This comprehensive configuration reference provides the necessary information to customize and operate the Babylon Platform according to your organization's specific requirements and infrastructure constraints.

@@ -1,0 +1,425 @@
+= End User Guide
+
+== Overview
+
+This guide helps end users navigate and effectively use the Babylon Platform to access workshops, labs, and training environments. Whether you're a developer, system administrator, or student, this guide will help you get the most out of your learning experience.
+
+== Getting Started
+
+=== Accessing the Platform
+
+==== First-Time Login
+1. Navigate to the catalog URL provided by your administrator or instructor
+2. Click "Login with OpenShift" or use your provided credentials
+3. Complete any required profile information
+4. Accept terms of service if prompted
+
+```bash
+# Example catalog URLs (your actual URL will be different)
+# Public access: https://catalog.babylon.example.com
+# Corporate: https://babylon.company.internal.com
+# Training event: https://workshop.event-babylon.example.com
+```
+
+==== Account Setup
+Once logged in, verify your account information:
+
+1. **Profile**: Check your display name and email address
+2. **Quotas**: Review your resource limits and current usage
+3. **Permissions**: Understand what actions you can perform
+4. **Namespaces**: See your available workspaces
+
+=== Understanding the Interface
+
+==== Catalog View
+The main catalog displays available services organized by:
+
+* **Categories**: Workshops, Labs, Demos, Assessments
+* **Difficulty**: Beginner, Intermediate, Advanced
+* **Duration**: Quick (< 1 hour), Medium (1-4 hours), Long (> 4 hours)
+* **Provider**: Red Hat, Partner Content, Custom
+* **Tags**: Technology focus areas (OpenShift, Ansible, etc.)
+
+==== Service Cards
+Each service shows:
+* **Name and Description**: What the service provides
+* **Estimated Time**: How long to complete
+* **Prerequisites**: Required knowledge or completed courses
+* **Resource Requirements**: CPU, memory, storage needed
+* **Cost Information**: If applicable
+* **Rating and Reviews**: User feedback
+
+==== Filtering and Search
+Use the search and filter tools to find relevant content:
+
+```text
+Search examples:
+- "OpenShift fundamentals"
+- "container security"
+- "ansible automation"
+
+Filters:
+- Category: Workshops
+- Difficulty: Beginner
+- Duration: 1-4 hours
+- Provider: Red Hat
+```
+
+== Provisioning Resources
+
+=== Basic Provisioning
+
+==== Selecting a Service
+1. Browse or search for the desired service
+2. Click on the service card to view details
+3. Review prerequisites and requirements
+4. Click "Request" or "Start Lab"
+
+==== Configuring Parameters
+Most services allow customization:
+
+* **Duration**: How long you need the environment (default, custom)
+* **Size**: Resource allocation (small, medium, large)
+* **Version**: Software versions (if multiple options available)
+* **Features**: Optional components to include/exclude
+
+==== Example: Requesting an OpenShift Workshop
+```text
+Service: OpenShift Fundamentals Workshop
+Duration: 8 hours (default)
+Cluster Size: Medium (6 nodes, 32 vCPU, 128GB RAM)
+OpenShift Version: 4.12
+Enable Monitoring: Yes
+AWS Region: us-east-1 (auto-selected)
+```
+
+==== Submitting the Request
+1. Review your configuration
+2. Check estimated cost (if applicable)
+3. Confirm you have sufficient quota
+4. Click "Submit Request"
+5. Note the request ID for tracking
+
+=== Advanced Options
+
+==== Custom Configurations
+For experienced users, some services offer advanced parameters:
+
+* **Network Configuration**: CIDR ranges, subnets
+* **Storage Options**: Storage classes, performance tiers
+* **Security Settings**: Compliance profiles, hardening options
+* **Integration**: External system connections
+
+==== Scheduling
+Plan resource usage with scheduling options:
+
+* **Start Time**: When to begin provisioning
+* **End Time**: Automatic cleanup time
+* **Extend Options**: Ability to extend during use
+* **Shared Access**: Allow others to access your environment
+
+== Managing Your Resources
+
+=== Monitoring Provisioning
+
+==== Provisioning Status
+Track your request through these phases:
+
+1. **Submitted**: Request received and queued
+2. **Validating**: Checking parameters and quotas
+3. **Provisioning**: Creating infrastructure
+4. **Configuring**: Installing and configuring software
+5. **Ready**: Environment available for use
+6. **Failed**: Provisioning encountered an error
+
+==== Estimated Times
+Typical provisioning times:
+* **Simple Labs**: 2-5 minutes
+* **Workshop Environments**: 10-20 minutes
+* **Complex Clusters**: 20-45 minutes
+* **Multi-node Setups**: 30-60 minutes
+
+==== Tracking Progress
+Monitor your requests:
+
+1. **Dashboard**: Real-time status updates
+2. **Email Notifications**: Status change alerts
+3. **Mobile App**: Push notifications (if available)
+4. **API**: Programmatic status checking
+
+=== Accessing Your Environment
+
+==== Getting Access Information
+Once provisioning completes, you'll receive:
+
+* **Web Console URLs**: Browser-based access
+* **SSH Connection Details**: Command-line access
+* **API Endpoints**: Programmatic interfaces
+* **Credentials**: Usernames, passwords, tokens
+* **Documentation**: Environment-specific guides
+
+==== Connection Examples
+
+===== Web Console Access
+```text
+OpenShift Console: https://console-openshift-console.apps.cluster-abc123.example.com
+Username: admin
+Password: r3dh4t123
+```
+
+===== SSH Access
+```bash
+# Connect to bastion host
+ssh lab-user@bastion.abc123.example.com
+
+# Use provided SSH key
+ssh -i workshop-key.pem ec2-user@workshop.abc123.example.com
+```
+
+===== API Access
+```bash
+# OpenShift CLI
+oc login https://api.cluster-abc123.example.com:6443 --token=sha256~abc123...
+
+# Kubernetes API
+export KUBECONFIG=/path/to/kubeconfig
+kubectl get nodes
+```
+
+=== Managing Active Resources
+
+==== Resource Dashboard
+Your dashboard shows:
+
+* **Active Environments**: Currently running resources
+* **Usage Statistics**: CPU, memory, storage consumption
+* **Remaining Time**: Time until automatic cleanup
+* **Cost Tracking**: Current and projected costs
+* **Quick Actions**: Extend, stop, or modify resources
+
+==== Extending Resources
+Extend your environment when needed:
+
+1. Navigate to your active resources
+2. Click "Extend" on the desired environment
+3. Select additional time (subject to limits)
+4. Confirm the extension
+5. Updated end time will be reflected
+
+```text
+Extension options:
+- 2 hours (quick extension)
+- 4 hours (half day)
+- 8 hours (full day)
+- 24 hours (overnight)
+- Custom duration (within limits)
+```
+
+==== Stopping Resources
+Clean up when finished:
+
+1. Save any important work or data
+2. Click "Stop" or "Delete" in the dashboard
+3. Confirm the action
+4. Resources will be gracefully terminated
+
+**Important**: Stopped resources cannot be recovered. Export any needed data first.
+
+== Workshop and Lab Participation
+
+=== Joining Workshops
+
+==== Workshop Registration
+For instructor-led workshops:
+
+1. **Registration**: Sign up through provided link or email
+2. **Confirmation**: Receive workshop details and access info
+3. **Preparation**: Complete any pre-workshop requirements
+4. **Access**: Receive environment details before the session
+
+==== Workshop Environment Access
+Workshops typically provide:
+
+* **Guided Lab Interface**: Step-by-step instructions
+* **Shared Resources**: Common services and data
+* **Instructor Dashboard**: Progress tracking and help
+* **Chat/Support**: Communication with instructor and peers
+
+==== During the Workshop
+Best practices for workshop participation:
+
+* **Follow Instructions**: Complete labs in the suggested order
+* **Ask Questions**: Use provided channels for help
+* **Take Notes**: Document important concepts and commands
+* **Experiment**: Try variations when time permits
+* **Share Feedback**: Help improve the experience
+
+=== Self-Paced Learning
+
+==== Independent Study
+For self-paced environments:
+
+* **Lab Guides**: Comprehensive documentation and tutorials
+* **Progress Tracking**: Your completion status and achievements
+* **Self-Assessment**: Built-in quizzes and validations
+* **Resource Links**: Additional reading and references
+
+==== Learning Paths
+Follow structured learning paths:
+
+1. **Prerequisites**: Complete required foundational labs
+2. **Core Content**: Main learning objectives
+3. **Practical Exercises**: Hands-on application
+4. **Advanced Topics**: Extended learning opportunities
+5. **Assessment**: Validate your knowledge
+
+== Troubleshooting Common Issues
+
+=== Provisioning Problems
+
+==== Request Stuck in Queue
+If your request doesn't progress:
+
+1. **Check Quotas**: Verify you have sufficient resource limits
+2. **Review Parameters**: Ensure valid configuration options
+3. **System Status**: Check platform status page for issues
+4. **Contact Support**: Submit a help request with your request ID
+
+==== Provisioning Failures
+Common failure reasons:
+
+* **Resource Unavailability**: Insufficient cluster capacity
+* **Configuration Errors**: Invalid parameter combinations
+* **Quota Exceeded**: Over allocated resource limits
+* **Network Issues**: Connectivity problems
+* **Service Maintenance**: Planned or unplanned outages
+
+==== Resolution Steps
+1. Review the error message in your dashboard
+2. Check the troubleshooting guide for your specific error
+3. Retry with different parameters if suggested
+4. Contact support if the issue persists
+
+=== Access Issues
+
+==== Cannot Connect to Environment
+If you can't access your provisioned environment:
+
+1. **Check Status**: Ensure provisioning completed successfully
+2. **Verify URLs**: Use the exact URLs provided
+3. **Clear Browser Cache**: Remove cached credentials
+4. **Try Different Browser**: Test with alternate browser
+5. **Check Network**: Verify internet connectivity
+6. **VPN Issues**: Disable VPN if causing conflicts
+
+==== Authentication Problems
+For login issues:
+
+* **Password Reset**: Use the "Forgot Password" option
+* **Account Locked**: Contact administrator for unlock
+* **Token Expired**: Re-authenticate through the platform
+* **Permission Denied**: Verify account has appropriate access
+
+==== Performance Issues
+If your environment is slow:
+
+* **Check Resource Utilization**: Monitor CPU and memory usage
+* **Network Latency**: Test connection speed
+* **Browser Performance**: Close unnecessary tabs and extensions
+* **Time of Day**: Consider peak usage hours
+* **Report Issues**: Provide performance details to support
+
+=== General Usage Problems
+
+==== Lost or Forgotten Information
+To recover access details:
+
+1. **Check Email**: Look for automated notifications
+2. **Dashboard History**: Review your resource history
+3. **Support Request**: Contact support with your user ID
+4. **Instructor Help**: Ask workshop instructor for assistance
+
+==== Environment Not Working as Expected
+If labs or exercises don't work:
+
+1. **Re-read Instructions**: Carefully follow the lab guide
+2. **Check Prerequisites**: Ensure previous steps completed
+3. **Reset Environment**: Use reset option if available
+4. **Restart Services**: Try restarting relevant components
+5. **Fresh Start**: Request a new environment if needed
+
+== Best Practices
+
+=== Resource Management
+
+==== Efficient Usage
+* **Plan Ahead**: Request resources when you'll actively use them
+* **Right-Size**: Choose appropriate resource levels for your needs
+* **Monitor Usage**: Keep track of consumption and costs
+* **Clean Up**: Stop resources promptly when finished
+* **Share Wisely**: Use shared environments for collaborative work
+
+==== Cost Optimization
+* **Use Appropriate Sizes**: Don't over-provision resources
+* **Time Management**: Set realistic durations
+* **Off-Hours**: Schedule during low-cost periods if available
+* **Pool Resources**: Use shared environments when appropriate
+
+=== Learning Effectiveness
+
+==== Maximize Learning Value
+* **Prepare**: Review prerequisites before starting
+* **Take Notes**: Document key learnings and commands
+* **Practice**: Repeat exercises to reinforce learning
+* **Explore**: Experiment beyond the guided instructions
+* **Connect**: Relate learning to your real-world needs
+
+==== Documentation
+* **Save Important Work**: Export configurations and code
+* **Screen Capture**: Document successful configurations
+* **Error Documentation**: Record and solutions to problems
+* **Create Checklists**: Build procedures for future reference
+
+== Support and Resources
+
+=== Getting Help
+
+==== Self-Service Options
+* **Knowledge Base**: Searchable help articles and FAQs
+* **Video Tutorials**: Step-by-step visual guides
+* **Community Forums**: User discussions and solutions
+* **Status Page**: Real-time platform status and maintenance
+
+==== Direct Support
+* **Help Desk**: Submit tickets for technical issues
+* **Live Chat**: Real-time assistance during business hours
+* **Email Support**: Detailed problem descriptions and follow-up
+* **Phone Support**: Urgent issues requiring immediate attention
+
+==== Workshop Support
+* **Instructor Help**: Direct assistance during workshops
+* **Peer Support**: Collaboration with other participants
+* **Lab Assistants**: Additional help for complex environments
+* **Office Hours**: Extended support sessions
+
+=== Additional Resources
+
+==== Documentation
+* **User Manual**: Comprehensive platform documentation
+* **API Reference**: Programmatic access documentation
+* **Integration Guides**: Connecting external tools
+* **Best Practices**: Optimization and efficiency guides
+
+==== Training and Certification
+* **Learning Paths**: Structured skill development
+* **Certification Programs**: Validate your expertise
+* **Advanced Workshops**: Deep-dive technical sessions
+* **Webinar Series**: Regular educational content
+
+==== Community
+* **User Groups**: Local and virtual meetups
+* **Social Media**: Platform updates and community discussions
+* **Beta Programs**: Early access to new features
+* **Feedback Surveys**: Help improve the platform
+
+This comprehensive end user guide ensures you can effectively use the Babylon Platform for your learning and development needs. Whether you're taking your first lab or managing complex multi-day workshops, these guidelines will help you succeed.

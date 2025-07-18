@@ -1,0 +1,483 @@
+= APIs and Services
+
+== Overview
+
+The Babylon Platform provides a comprehensive set of REST APIs that enable user interfaces, external integrations, and programmatic access to platform capabilities. All APIs follow consistent design patterns and provide OpenAPI-compatible interfaces.
+
+== API Categories
+
+=== Core Platform APIs
+* **link:catalog-api.adoc[Catalog API]**: Service catalog management and resource provisioning
+* **link:admin-api.adoc[Admin API]**: Administrative functions and incident management
+* **link:ratings-api.adoc[Ratings API]**: User feedback, ratings, and bookmarking system
+* **link:poolboy-api.adoc[Poolboy API]**: Resource lifecycle management through Kubernetes CRDs
+* **link:anarchy-api.adoc[Anarchy API]**: Workflow automation and infrastructure orchestration through Kubernetes CRDs
+* **link:babylon-api.adoc[Babylon API]**: Workshop and catalog item management through Kubernetes CRDs
+
+=== Integration APIs
+* **Kubernetes API Extensions**: Custom resource management via Kubernetes API
+* **Webhook Endpoints**: External system integration points
+* **Metrics APIs**: Prometheus-compatible metrics exposure
+
+== API Design Standards
+
+=== RESTful Conventions
+All APIs follow RESTful design principles:
+
+```
+/api/{service}/{version}/{resource}
+```
+
+**Examples**:
+- `GET /api/catalog/v1/items` - List catalog items
+- `POST /api/admin/v1/incidents` - Create incident
+- `GET /api/ratings/v1/catalogitem/{uuid}` - Get item rating
+
+=== HTTP Methods
+* **GET**: Retrieve resources (safe, idempotent)
+* **POST**: Create new resources
+* **PUT**: Update entire resources (idempotent)
+* **PATCH**: Partial resource updates
+* **DELETE**: Remove resources (idempotent)
+
+=== Response Formats
+All APIs use JSON for request/response bodies:
+
+```json
+{
+  "apiVersion": "v1",
+  "kind": "Response",
+  "metadata": {
+    "timestamp": "2023-01-01T12:00:00Z",
+    "requestId": "req-12345"
+  },
+  "data": {
+    "items": [...],
+    "total": 42
+  }
+}
+```
+
+=== Error Handling
+Consistent error response format across all APIs:
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Invalid request parameters",
+    "details": {
+      "field": "user_count",
+      "reason": "must be between 1 and 100"
+    },
+    "timestamp": "2023-01-01T12:00:00Z",
+    "requestId": "req-12345"
+  }
+}
+```
+
+=== HTTP Status Codes
+Standard HTTP status codes used consistently:
+
+* **200 OK**: Successful GET, PUT, PATCH
+* **201 Created**: Successful POST
+* **202 Accepted**: Asynchronous operation started
+* **204 No Content**: Successful DELETE
+* **400 Bad Request**: Invalid request parameters
+* **401 Unauthorized**: Authentication required
+* **403 Forbidden**: Insufficient permissions
+* **404 Not Found**: Resource not found
+* **409 Conflict**: Resource conflict
+* **422 Unprocessable Entity**: Validation errors
+* **500 Internal Server Error**: Server errors
+* **503 Service Unavailable**: Service temporarily unavailable
+
+== Authentication and Authorization
+
+=== OpenShift OAuth Integration
+All APIs integrate with OpenShift OAuth for authentication:
+
+```javascript
+// API client authentication
+const response = await fetch('/oauth/authorize', {
+  method: 'GET',
+  credentials: 'include'
+});
+
+if (response.ok) {
+  const token = response.headers.get('Authorization');
+  // Use token for subsequent API calls
+}
+```
+
+=== Bearer Token Authentication
+APIs accept OAuth bearer tokens:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  https://catalog.babylon.example.com/api/catalog/v1/items
+```
+
+=== Service Account Authentication
+For programmatic access, use service account tokens:
+
+```bash
+# Get service account token
+TOKEN=$(oc serviceaccounts get-token babylon-api-client)
+
+# Use token in API calls
+curl -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  https://api.babylon.example.com/api/admin/v1/status
+```
+
+== Common API Patterns
+
+=== Pagination
+Large result sets use cursor-based pagination:
+
+```json
+{
+  "items": [...],
+  "pagination": {
+    "limit": 50,
+    "offset": 100,
+    "total": 1250,
+    "hasMore": true,
+    "nextCursor": "eyJpZCI6MTAwfQ=="
+  }
+}
+```
+
+```bash
+# Request with pagination
+curl "https://api.babylon.example.com/api/catalog/v1/items?limit=50&cursor=eyJpZCI6MTAwfQ=="
+```
+
+=== Filtering and Sorting
+APIs support query parameters for filtering and sorting:
+
+```bash
+# Filter by category and status
+curl "https://api.babylon.example.com/api/catalog/v1/items?category=workshops&status=ready"
+
+# Sort by creation date
+curl "https://api.babylon.example.com/api/catalog/v1/items?sort=created_at&order=desc"
+
+# Complex filtering
+curl "https://api.babylon.example.com/api/admin/v1/incidents?status=active&severity=high&assigned_to=team-alpha"
+```
+
+=== Field Selection
+Clients can specify which fields to include in responses:
+
+```bash
+# Select specific fields
+curl "https://api.babylon.example.com/api/catalog/v1/items?fields=name,description,category"
+
+# Exclude large fields
+curl "https://api.babylon.example.com/api/catalog/v1/items?exclude=spec,status"
+```
+
+=== Asynchronous Operations
+Long-running operations return immediate response with status tracking:
+
+```json
+{
+  "operationId": "op-12345",
+  "status": "in_progress",
+  "statusUrl": "/api/catalog/v1/operations/op-12345",
+  "estimatedCompletion": "2023-01-01T12:05:00Z"
+}
+```
+
+```bash
+# Check operation status
+curl "https://api.babylon.example.com/api/catalog/v1/operations/op-12345"
+```
+
+=== Batch Operations
+APIs support batch operations for efficiency:
+
+```json
+{
+  "operations": [
+    {
+      "operation": "create",
+      "resourceType": "resourceclaim",
+      "data": {...}
+    },
+    {
+      "operation": "update",
+      "resourceType": "workshop",
+      "id": "workshop-123",
+      "data": {...}
+    }
+  ]
+}
+```
+
+== API Versioning
+
+=== Version Strategy
+APIs use semantic versioning in URL paths:
+
+* **v1**: Stable API version with backward compatibility
+* **v2**: Next major version with breaking changes
+* **beta**: Pre-release version for testing new features
+* **alpha**: Experimental version for early development
+
+=== Version Migration
+When API versions change, migration guidance is provided:
+
+```json
+{
+  "apiVersion": "v1",
+  "deprecation": {
+    "deprecated": true,
+    "deprecatedIn": "v2.0.0",
+    "removedIn": "v3.0.0",
+    "migrationGuide": "https://docs.babylon.example.com/api-migration/v1-to-v2"
+  }
+}
+```
+
+== Rate Limiting
+
+=== Default Limits
+APIs implement rate limiting to ensure fair usage:
+
+* **Authenticated Users**: 1000 requests per hour
+* **Service Accounts**: 5000 requests per hour
+* **Admin Operations**: 10000 requests per hour
+
+=== Rate Limit Headers
+APIs return rate limit information in response headers:
+
+```http
+X-RateLimit-Limit: 1000
+X-RateLimit-Remaining: 999
+X-RateLimit-Reset: 1672531200
+X-RateLimit-Window: 3600
+```
+
+=== Rate Limit Exceeded Response
+```json
+{
+  "error": {
+    "code": "RATE_LIMIT_EXCEEDED",
+    "message": "Rate limit exceeded",
+    "retryAfter": 3600
+  }
+}
+```
+
+== Content Negotiation
+
+=== Content Types
+APIs support multiple content types:
+
+* **application/json**: Default format (required)
+* **application/yaml**: YAML format for configuration
+* **text/plain**: Plain text for simple responses
+
+```bash
+# Request YAML response
+curl -H "Accept: application/yaml" \
+  https://api.babylon.example.com/api/catalog/v1/items/openshift-workshop
+```
+
+=== Compression
+APIs support response compression:
+
+```bash
+# Request compressed response
+curl -H "Accept-Encoding: gzip" \
+  https://api.babylon.example.com/api/catalog/v1/items
+```
+
+== API Client Libraries
+
+=== JavaScript/TypeScript
+```typescript
+import { BabylonAPIClient } from '@babylon/api-client';
+
+const client = new BabylonAPIClient({
+  baseUrl: 'https://api.babylon.example.com',
+  authProvider: 'oauth'
+});
+
+// List catalog items
+const items = await client.catalog.listItems({
+  category: 'workshops',
+  limit: 50
+});
+
+// Create resource claim
+const claim = await client.catalog.createResourceClaim({
+  catalogItem: 'openshift-workshop',
+  parameters: { user_count: 20 }
+});
+```
+
+=== Python
+```python
+from babylon_client import BabylonClient
+
+client = BabylonClient(
+    base_url='https://api.babylon.example.com',
+    auth_method='oauth'
+)
+
+# List catalog items
+items = client.catalog.list_items(
+    category='workshops',
+    limit=50
+)
+
+# Create resource claim
+claim = client.catalog.create_resource_claim(
+    catalog_item='openshift-workshop',
+    parameters={'user_count': 20}
+)
+```
+
+=== Go
+```go
+package main
+
+import (
+    "github.com/babylon/go-client"
+)
+
+func main() {
+    client := babylon.NewClient(&babylon.Config{
+        BaseURL: "https://api.babylon.example.com",
+        AuthMethod: "oauth",
+    })
+
+    // List catalog items
+    items, err := client.Catalog.ListItems(&babylon.ListItemsOptions{
+        Category: "workshops",
+        Limit:    50,
+    })
+
+    // Create resource claim
+    claim, err := client.Catalog.CreateResourceClaim(&babylon.ResourceClaimRequest{
+        CatalogItem: "openshift-workshop",
+        Parameters: map[string]interface{}{
+            "user_count": 20,
+        },
+    })
+}
+```
+
+== Monitoring and Observability
+
+=== Metrics
+All APIs expose Prometheus metrics:
+
+```prometheus
+# Request metrics
+api_requests_total{service="catalog", method="GET", endpoint="/items", status="200"}
+api_request_duration_seconds{service="catalog", method="GET", endpoint="/items"}
+
+# Error metrics
+api_errors_total{service="catalog", error_type="validation_error"}
+api_errors_total{service="catalog", error_type="internal_error"}
+
+# Rate limiting metrics
+api_rate_limit_exceeded_total{service="catalog"}
+```
+
+=== Health Checks
+All APIs provide health check endpoints:
+
+```bash
+# Liveness check
+curl https://api.babylon.example.com/health/live
+
+# Readiness check
+curl https://api.babylon.example.com/health/ready
+
+# Detailed health status
+curl https://api.babylon.example.com/health/status
+```
+
+=== Logging
+All APIs use structured logging with correlation IDs:
+
+```json
+{
+  "timestamp": "2023-01-01T12:00:00Z",
+  "level": "INFO",
+  "service": "catalog-api",
+  "method": "GET",
+  "path": "/api/catalog/v1/items",
+  "requestId": "req-12345",
+  "userId": "user@example.com",
+  "duration": 0.125,
+  "status": 200
+}
+```
+
+== Security Considerations
+
+=== Input Validation
+All APIs implement comprehensive input validation:
+
+* Parameter type checking
+* Range and format validation
+* SQL injection prevention
+* XSS protection
+* CSRF protection
+
+=== Data Privacy
+APIs implement privacy controls:
+
+* Personal data minimization
+* Audit logging for sensitive operations
+* Data retention policies
+* GDPR compliance features
+
+=== Network Security
+APIs use secure communication:
+
+* TLS 1.3 encryption
+* HSTS headers
+* Certificate pinning
+* Network policy restrictions
+
+== Development and Testing
+
+=== OpenAPI Specifications
+All APIs provide OpenAPI 3.0 specifications:
+
+```bash
+# Download API specification
+curl https://api.babylon.example.com/openapi.json
+
+# View interactive documentation
+open https://api.babylon.example.com/docs
+```
+
+=== Testing Tools
+Recommended tools for API testing:
+
+* **Postman**: Interactive API testing
+* **curl**: Command-line testing
+* **k6**: Load testing
+* **Swagger UI**: Interactive documentation
+
+=== Mock Services
+Development mock services available:
+
+```bash
+# Start mock catalog API
+docker run -p 8080:8080 babylon/catalog-api-mock:latest
+
+# Use mock service for development
+export BABYLON_API_URL=http://localhost:8080
+```
+
+This comprehensive API framework provides consistent, secure, and scalable access to all Babylon Platform capabilities while maintaining excellent developer experience and operational visibility.

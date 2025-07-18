@@ -1,0 +1,984 @@
+= Operations Guide
+
+== Overview
+
+This operations guide provides comprehensive procedures for day-2 operations of the Babylon Platform, including monitoring, maintenance, troubleshooting, scaling, and disaster recovery. It serves as the primary reference for platform operators and SRE teams.
+
+== Monitoring and Observability
+
+=== Prometheus Metrics
+
+==== Core Platform Metrics
+The platform exposes comprehensive metrics for monitoring health and performance:
+
+```prometheus
+# Resource claim metrics
+babylon_resource_claims_total{status="ready"}
+babylon_resource_claims_total{status="failed"}
+babylon_resource_claims_duration_seconds_histogram
+
+# Catalog metrics
+babylon_catalog_items_total{status="available"}
+babylon_catalog_provision_requests_total
+babylon_catalog_provision_success_rate
+
+# Operator metrics
+babylon_operator_reconcile_duration_seconds{operator="agnosticv"}
+babylon_operator_errors_total{operator="poolboy"}
+babylon_operator_resource_queue_length{operator="anarchy"}
+
+# API metrics
+babylon_api_requests_total{service="catalog", method="GET", status="200"}
+babylon_api_request_duration_seconds{service="admin"}
+babylon_api_errors_total{service="ratings"}
+
+# Infrastructure metrics
+babylon_database_connections_active
+babylon_redis_memory_usage_bytes
+babylon_storage_usage_bytes{pvc="catalog-db"}
+```
+
+==== Operator-Specific Metrics
+Each operator provides detailed metrics:
+
+```prometheus
+# AgnosticV Operator
+agnosticv_repo_sync_duration_seconds
+agnosticv_component_validation_errors_total
+agnosticv_git_operations_total{operation="clone"}
+
+# Poolboy Operator
+poolboy_resource_pools_active
+poolboy_resource_pool_claims_pending
+poolboy_resource_provider_health{provider="aws"}
+
+# Anarchy Operator
+anarchy_subjects_total{state="successful"}
+anarchy_action_duration_seconds{action="provision"}
+anarchy_run_failures_total{governor="openshift-cnv"}
+
+# Workshop Manager
+workshop_manager_workshops_active
+workshop_manager_user_assignments_total
+workshop_manager_provision_batch_size
+```
+
+=== Grafana Dashboards
+
+==== Platform Overview Dashboard
+Key visualizations for overall platform health:
+
+```json
+{
+  "dashboard": {
+    "title": "Babylon Platform Overview",
+    "panels": [
+      {
+        "title": "Active Resource Claims",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(babylon_resource_claims_total{status=\"ready\"})"
+          }
+        ]
+      },
+      {
+        "title": "Provision Success Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "rate(babylon_catalog_provision_requests_total{status=\"success\"}[5m]) / rate(babylon_catalog_provision_requests_total[5m]) * 100"
+          }
+        ]
+      },
+      {
+        "title": "API Response Times",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, babylon_api_request_duration_seconds_bucket{service=\"catalog\"})"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+==== Operator Health Dashboard
+Monitor individual operator performance:
+
+```json
+{
+  "dashboard": {
+    "title": "Babylon Operators Health",
+    "panels": [
+      {
+        "title": "Operator Reconcile Times",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(babylon_operator_reconcile_duration_seconds_sum[5m]) / rate(babylon_operator_reconcile_duration_seconds_count[5m])",
+            "legendFormat": "{{operator}}"
+          }
+        ]
+      },
+      {
+        "title": "Operator Error Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(babylon_operator_errors_total[5m])",
+            "legendFormat": "{{operator}}"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+=== Alerting Rules
+
+==== Critical Alerts
+```yaml
+groups:
+- name: babylon.critical
+  rules:
+  - alert: BabylonPlatformDown
+    expr: up{job="babylon-catalog-api"} == 0
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Babylon platform is down"
+      description: "The Babylon catalog API is not responding"
+
+  - alert: HighProvisionFailureRate
+    expr: rate(babylon_catalog_provision_requests_total{status="failed"}[5m]) / rate(babylon_catalog_provision_requests_total[5m]) > 0.1
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "High provision failure rate"
+      description: "Provision failure rate is {{ $value | humanizePercentage }}"
+
+  - alert: DatabaseConnectionsExhausted
+    expr: babylon_database_connections_active / babylon_database_connections_max > 0.9
+    for: 2m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Database connections nearly exhausted"
+      description: "Database connection pool is {{ $value | humanizePercentage }} full"
+```
+
+==== Warning Alerts
+```yaml
+  - alert: HighOperatorReconcileTime
+    expr: rate(babylon_operator_reconcile_duration_seconds_sum[5m]) / rate(babylon_operator_reconcile_duration_seconds_count[5m]) > 30
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Operator reconcile time is high"
+      description: "{{ $labels.operator }} operator average reconcile time is {{ $value }}s"
+
+  - alert: ResourceClaimQueueBacklog
+    expr: babylon_resource_claims_total{status="pending"} > 50
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Resource claim queue backlog"
+      description: "{{ $value }} resource claims are pending"
+
+  - alert: DiskSpaceRunningLow
+    expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 20
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Disk space running low"
+      description: "Disk space is {{ $value | humanizePercentage }} full"
+```
+
+=== Log Aggregation
+
+==== Centralized Logging Setup
+Configure log aggregation using OpenShift Logging or external solutions:
+
+```yaml
+apiVersion: logging.openshift.io/v1
+kind: ClusterLogForwarder
+metadata:
+  name: babylon-logs
+  namespace: openshift-logging
+spec:
+  outputs:
+  - name: babylon-elasticsearch
+    type: elasticsearch
+    url: https://elasticsearch.logging.example.com
+    secret:
+      name: babylon-es-secret
+  pipelines:
+  - name: babylon-application-logs
+    inputRefs:
+    - application
+    filterRefs:
+    - babylon-filter
+    outputRefs:
+    - babylon-elasticsearch
+  filters:
+  - name: babylon-filter
+    type: json
+    json:
+      javascript: |
+        const log = record.log;
+        if (log && (log.service && log.service.startsWith('babylon-') ||
+                    log.namespace && log.namespace.includes('babylon'))) {
+          return record;
+        }
+        return null;
+```
+
+==== Log Analysis Queries
+Key queries for troubleshooting:
+
+```bash
+# Find provision failures
+oc logs -l app=babylon-catalog-api | grep -E "provision.*failed|error.*provision"
+
+# Monitor operator errors
+oc logs -l app=babylon-agnosticv-operator | grep -E "ERROR|Failed"
+
+# Track resource claim lifecycle
+oc logs -l app=babylon-poolboy | grep "resourceclaim.*phase.*changed"
+
+# API performance monitoring
+oc logs -l app=babylon-catalog-api | grep -E "duration.*[5-9][0-9]{2,}ms"
+```
+
+=== Health Checks
+
+==== Platform Health Verification
+```bash
+#!/bin/bash
+# Platform health check script
+
+echo "=== Babylon Platform Health Check ==="
+
+# Check core services
+echo "Checking core services..."
+oc get pods -n babylon-catalog | grep -E "(Running|Ready)"
+oc get pods -n babylon-admin | grep -E "(Running|Ready)"
+oc get pods -n babylon-ratings | grep -E "(Running|Ready)"
+
+# Check operators
+echo "Checking operators..."
+oc get pods -n babylon-agnosticv-operator | grep Running
+oc get pods -n poolboy | grep Running
+oc get pods -n anarchy-operator | grep Running
+
+# Check databases
+echo "Checking databases..."
+oc exec -n babylon-catalog deployment/postgresql -- psql -U postgres -c "SELECT 1"
+oc exec -n babylon-catalog deployment/redis -- redis-cli ping
+
+# Check API endpoints
+echo "Checking API endpoints..."
+curl -s -o /dev/null -w "%{http_code}" https://catalog.babylon.example.com/api/catalog/v1/status
+curl -s -o /dev/null -w "%{http_code}" https://admin.babylon.example.com/api/admin/v1/health
+
+echo "=== Health Check Complete ==="
+```
+
+== Maintenance Procedures
+
+=== Regular Maintenance Tasks
+
+==== Daily Operations
+```bash
+# Daily maintenance checklist
+#!/bin/bash
+
+echo "=== Daily Maintenance - $(date) ==="
+
+# Check resource claim cleanup
+echo "Checking expired resource claims..."
+oc get resourceclaims -A --sort-by=.metadata.creationTimestamp | tail -20
+
+# Monitor disk usage
+echo "Checking disk usage..."
+oc exec -n babylon-catalog deployment/postgresql -- df -h /var/lib/postgresql/data
+
+# Check operator reconcile rates
+echo "Checking operator performance..."
+oc logs -n babylon-agnosticv-operator deployment/babylon-agnosticv-operator --since=24h | grep -c "reconcile completed"
+
+# Verify backup completion
+echo "Checking backup status..."
+oc get cronjobs -n babylon-backup
+```
+
+==== Weekly Operations
+```bash
+# Weekly maintenance checklist
+#!/bin/bash
+
+echo "=== Weekly Maintenance - $(date) ==="
+
+# Clean up old logs
+echo "Cleaning up old logs..."
+oc logs -n babylon-catalog deployment/catalog-api --since=168h > /dev/null
+
+# Review resource utilization
+echo "Reviewing resource utilization..."
+oc top nodes
+oc top pods -n babylon-catalog --sort-by=memory
+oc top pods -n babylon-catalog --sort-by=cpu
+
+# Check for stuck resources
+echo "Checking for stuck resources..."
+oc get resourceclaims -A | grep -E "(Pending|Provisioning)" | awk '$7 > 60 {print $1, $2, $7}'
+
+# Update catalog items
+echo "Checking catalog item updates..."
+oc get catalogitems -n babylon-catalog-rhpds --sort-by=.metadata.creationTimestamp
+```
+
+==== Monthly Operations
+```bash
+# Monthly maintenance checklist
+#!/bin/bash
+
+echo "=== Monthly Maintenance - $(date) ==="
+
+# Database maintenance
+echo "Performing database maintenance..."
+oc exec -n babylon-catalog deployment/postgresql -- psql -U postgres -c "VACUUM ANALYZE;"
+
+# Review and rotate certificates
+echo "Checking certificate expiration..."
+oc get certificates -A -o custom-columns=NAME:.metadata.name,NAMESPACE:.metadata.namespace,READY:.status.conditions[?(@.type==\"Ready\")].status,AGE:.metadata.creationTimestamp
+
+# Capacity planning review
+echo "Generating capacity planning report..."
+kubectl top nodes --no-headers | awk '{cpu+=$3; mem+=$5} END {print "Total CPU:", cpu"m", "Total Memory:", mem"Mi"}'
+
+# Security audit
+echo "Performing security audit..."
+oc get pods -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"\t"}{.metadata.name}{"\t"}{.spec.securityContext.runAsUser}{"\n"}{end}' | grep -v "1000"
+```
+
+=== Upgrade Procedures
+
+==== Platform Upgrade Process
+```bash
+#!/bin/bash
+# Babylon platform upgrade procedure
+
+VERSION_NEW=${1:-latest}
+VERSION_CURRENT=$(oc get deployment babylon-catalog-api -o jsonpath='{.spec.template.spec.containers[0].image}' | cut -d: -f2)
+
+echo "=== Babylon Platform Upgrade ==="
+echo "Current version: $VERSION_CURRENT"
+echo "Target version: $VERSION_NEW"
+
+# Pre-upgrade checks
+echo "Performing pre-upgrade checks..."
+./health-check.sh
+if [ $? -ne 0 ]; then
+  echo "Pre-upgrade health check failed. Aborting upgrade."
+  exit 1
+fi
+
+# Backup current state
+echo "Creating backup..."
+oc create backup babylon-upgrade-backup-$(date +%Y%m%d-%H%M%S)
+
+# Upgrade operators first
+echo "Upgrading operators..."
+helm upgrade babylon-agnosticv-operator ./agnosticv-operator/helm \
+  --set image.tag=$VERSION_NEW \
+  --wait --timeout=10m
+
+helm upgrade poolboy ./poolboy/helm \
+  --set image.tag=$VERSION_NEW \
+  --wait --timeout=10m
+
+# Upgrade APIs
+echo "Upgrading APIs..."
+helm upgrade babylon-catalog ./catalog/helm \
+  --set api.image.tag=$VERSION_NEW \
+  --wait --timeout=10m
+
+helm upgrade babylon-admin ./admin/helm \
+  --set api.image.tag=$VERSION_NEW \
+  --wait --timeout=10m
+
+# Post-upgrade verification
+echo "Performing post-upgrade verification..."
+sleep 30
+./health-check.sh
+if [ $? -eq 0 ]; then
+  echo "Upgrade completed successfully!"
+else
+  echo "Post-upgrade health check failed. Consider rollback."
+  exit 1
+fi
+```
+
+==== Database Migration
+```bash
+#!/bin/bash
+# Database migration procedure
+
+echo "=== Database Migration ==="
+
+# Create database backup
+echo "Creating database backup..."
+oc exec -n babylon-catalog deployment/postgresql -- pg_dump -U postgres babylon > babylon-db-backup-$(date +%Y%m%d-%H%M%S).sql
+
+# Run migrations
+echo "Running database migrations..."
+oc exec -n babylon-catalog deployment/catalog-api -- python manage.py migrate
+
+# Verify migration
+echo "Verifying migration..."
+oc exec -n babylon-catalog deployment/postgresql -- psql -U postgres -d babylon -c "\dt"
+
+echo "Database migration completed."
+```
+
+=== Backup and Disaster Recovery
+
+==== Automated Backup Configuration
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: babylon-database-backup
+  namespace: babylon-backup
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: postgres-backup
+            image: postgres:13
+            env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-secret
+                  key: password
+            command:
+            - /bin/bash
+            - -c
+            - |
+              pg_dump -h postgresql.babylon-catalog -U postgres babylon | \
+              gzip > /backup/babylon-db-$(date +%Y%m%d-%H%M%S).sql.gz
+
+              # Cleanup old backups (keep 30 days)
+              find /backup -name "babylon-db-*.sql.gz" -mtime +30 -delete
+            volumeMounts:
+            - name: backup-storage
+              mountPath: /backup
+          volumes:
+          - name: backup-storage
+            persistentVolumeClaim:
+              claimName: backup-pvc
+          restartPolicy: OnFailure
+```
+
+==== Configuration Backup
+```bash
+#!/bin/bash
+# Configuration backup script
+
+BACKUP_DIR="/backup/config/$(date +%Y%m%d-%H%M%S)"
+mkdir -p $BACKUP_DIR
+
+echo "=== Configuration Backup ==="
+
+# Backup Helm values
+echo "Backing up Helm configurations..."
+helm get values babylon-catalog -n babylon-catalog > $BACKUP_DIR/catalog-values.yaml
+helm get values babylon-admin -n babylon-admin > $BACKUP_DIR/admin-values.yaml
+helm get values babylon-ratings -n babylon-ratings > $BACKUP_DIR/ratings-values.yaml
+
+# Backup custom resources
+echo "Backing up custom resources..."
+oc get catalogitems -A -o yaml > $BACKUP_DIR/catalogitems.yaml
+oc get agnosticvrepos -A -o yaml > $BACKUP_DIR/agnosticvrepos.yaml
+oc get resourceproviders -A -o yaml > $BACKUP_DIR/resourceproviders.yaml
+
+# Backup secrets (encrypted)
+echo "Backing up secrets..."
+oc get secrets -n babylon-catalog -o yaml > $BACKUP_DIR/catalog-secrets.yaml
+oc get secrets -n babylon-admin -o yaml > $BACKUP_DIR/admin-secrets.yaml
+
+# Backup RBAC
+echo "Backing up RBAC configuration..."
+oc get clusterroles -l babylon.gpte.redhat.com/platform=babylon -o yaml > $BACKUP_DIR/clusterroles.yaml
+oc get clusterrolebindings -l babylon.gpte.redhat.com/platform=babylon -o yaml > $BACKUP_DIR/clusterrolebindings.yaml
+
+echo "Configuration backup completed: $BACKUP_DIR"
+```
+
+==== Disaster Recovery Procedure
+```bash
+#!/bin/bash
+# Disaster recovery procedure
+
+BACKUP_DATE=${1:-latest}
+BACKUP_DIR="/backup/config/$BACKUP_DATE"
+
+echo "=== Disaster Recovery - $BACKUP_DATE ==="
+
+# Verify backup availability
+if [ ! -d "$BACKUP_DIR" ]; then
+  echo "Backup directory not found: $BACKUP_DIR"
+  exit 1
+fi
+
+# Restore database
+echo "Restoring database..."
+zcat /backup/babylon-db-$BACKUP_DATE.sql.gz | \
+  oc exec -i -n babylon-catalog deployment/postgresql -- psql -U postgres babylon
+
+# Restore configurations
+echo "Restoring Helm configurations..."
+helm upgrade --install babylon-catalog ./catalog/helm \
+  -f $BACKUP_DIR/catalog-values.yaml \
+  --wait --timeout=15m
+
+helm upgrade --install babylon-admin ./admin/helm \
+  -f $BACKUP_DIR/admin-values.yaml \
+  --wait --timeout=15m
+
+# Restore custom resources
+echo "Restoring custom resources..."
+oc apply -f $BACKUP_DIR/catalogitems.yaml
+oc apply -f $BACKUP_DIR/agnosticvrepos.yaml
+oc apply -f $BACKUP_DIR/resourceproviders.yaml
+
+# Verify recovery
+echo "Verifying recovery..."
+sleep 60
+./health-check.sh
+
+if [ $? -eq 0 ]; then
+  echo "Disaster recovery completed successfully!"
+else
+  echo "Recovery verification failed. Manual intervention required."
+  exit 1
+fi
+```
+
+== Scaling and Capacity Management
+
+=== Horizontal Scaling
+
+==== API Scaling
+```yaml
+# Horizontal Pod Autoscaler for Catalog API
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: babylon-catalog-api-hpa
+  namespace: babylon-catalog
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: babylon-catalog-api
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 15
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60
+```
+
+==== Database Scaling
+```yaml
+# Database read replica for scaling
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: babylon-postgres-cluster
+  namespace: babylon-catalog
+spec:
+  instances: 3
+  primaryUpdateStrategy: unsupervised
+
+  postgresql:
+    parameters:
+      max_connections: "200"
+      shared_buffers: "256MB"
+      effective_cache_size: "1GB"
+      maintenance_work_mem: "64MB"
+      checkpoint_completion_target: "0.9"
+      wal_buffers: "16MB"
+      default_statistics_target: "100"
+      random_page_cost: "1.1"
+      effective_io_concurrency: "200"
+
+  bootstrap:
+    initdb:
+      database: babylon
+      owner: babylon
+      secret:
+        name: postgres-credentials
+
+  storage:
+    size: 100Gi
+    storageClass: fast-ssd
+```
+
+=== Vertical Scaling
+
+==== Resource Allocation Guidelines
+```yaml
+# Resource recommendations by component
+resources:
+  catalog-api:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2
+      memory: 4Gi
+
+  admin-api:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1
+      memory: 2Gi
+
+  operators:
+    agnosticv:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+    poolboy:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1
+        memory: 2Gi
+```
+
+==== Capacity Planning
+```bash
+#!/bin/bash
+# Capacity planning script
+
+echo "=== Babylon Platform Capacity Report ==="
+
+# Current resource usage
+echo "Current Resource Usage:"
+oc top nodes --no-headers | awk '{cpu+=$3; mem+=$5; count++} END {print "Average CPU per node:", cpu/count"m", "Average Memory per node:", mem/count"Mi"}'
+
+# Platform-specific usage
+echo "Platform Component Usage:"
+oc top pods -n babylon-catalog --no-headers | awk '{cpu+=$2; mem+=$3} END {print "Catalog namespace - CPU:", cpu, "Memory:", mem}'
+oc top pods -n babylon-admin --no-headers | awk '{cpu+=$2; mem+=$3} END {print "Admin namespace - CPU:", cpu, "Memory:", mem}'
+
+# Resource claim trends
+echo "Resource Claim Trends (last 7 days):"
+oc get resourceclaims -A --no-headers | awk '{
+  cmd = "date -d \"" $6 " " $7 "\" +%s"
+  cmd | getline creation_time
+  close(cmd)
+
+  current_time = systime()
+  age_days = (current_time - creation_time) / 86400
+
+  if (age_days <= 7) count++
+} END {print "New claims last 7 days:", count}'
+
+# Storage usage
+echo "Storage Usage:"
+oc get pvc -A -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,STATUS:.status.phase,CAPACITY:.status.capacity.storage,USED:.status.capacity.storage --no-headers
+```
+
+== Security Operations
+
+=== Security Monitoring
+
+==== Access Audit
+```bash
+#!/bin/bash
+# Security audit script
+
+echo "=== Security Audit Report ==="
+
+# Check for privileged containers
+echo "Checking for privileged containers..."
+oc get pods -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"\t"}{.metadata.name}{"\t"}{.spec.securityContext.privileged}{"\n"}{end}' | grep true
+
+# Review RBAC permissions
+echo "Reviewing RBAC permissions..."
+oc get clusterrolebindings -o custom-columns=NAME:.metadata.name,ROLE:.roleRef.name,SUBJECTS:.subjects[*].name --no-headers | grep -E "(cluster-admin|system:admin)"
+
+# Check for exposed secrets
+echo "Checking for exposed secrets..."
+oc get secrets -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"\t"}{.metadata.name}{"\t"}{.type}{"\n"}{end}' | grep -v "kubernetes.io/service-account-token"
+
+# Network policy compliance
+echo "Checking network policy compliance..."
+oc get networkpolicies -A --no-headers | wc -l
+oc get namespaces --no-headers | wc -l
+```
+
+==== Certificate Management
+```bash
+#!/bin/bash
+# Certificate management script
+
+echo "=== Certificate Management ==="
+
+# Check certificate expiration
+echo "Checking certificate expiration..."
+oc get certificates -A -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,READY:.status.conditions[?(@.type==\"Ready\")].status,EXPIRY:.status.notAfter --no-headers
+
+# Renew expiring certificates
+echo "Renewing certificates expiring within 30 days..."
+oc get certificates -A -o json | jq -r '.items[] | select(.status.notAfter | fromdateiso8601 < (now + 2592000)) | "\(.metadata.namespace) \(.metadata.name)"' | while read namespace name; do
+  echo "Renewing certificate: $namespace/$name"
+  oc delete certificate $name -n $namespace
+  # Certificate will be automatically recreated by cert-manager
+done
+```
+
+=== Vulnerability Management
+
+==== Container Scanning
+```bash
+#!/bin/bash
+# Container vulnerability scanning
+
+echo "=== Container Vulnerability Scan ==="
+
+# Scan all Babylon platform images
+NAMESPACES="babylon-catalog babylon-admin babylon-ratings babylon-agnosticv-operator poolboy anarchy-operator"
+
+for ns in $NAMESPACES; do
+  echo "Scanning namespace: $ns"
+  oc get pods -n $ns -o jsonpath='{.items[*].spec.containers[*].image}' | tr ' ' '\n' | sort -u | while read image; do
+    echo "Scanning image: $image"
+    # Use your preferred vulnerability scanner (Clair, Trivy, etc.)
+    trivy image --exit-code 1 --severity HIGH,CRITICAL $image
+  done
+done
+```
+
+==== Security Policy Enforcement
+```yaml
+# Pod Security Policy example
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: babylon-restricted
+spec:
+  privileged: false
+  allowPrivilegeEscalation: false
+  requiredDropCapabilities:
+    - ALL
+  volumes:
+    - 'configMap'
+    - 'emptyDir'
+    - 'projected'
+    - 'secret'
+    - 'downwardAPI'
+    - 'persistentVolumeClaim'
+  hostNetwork: false
+  hostIPC: false
+  hostPID: false
+  runAsUser:
+    rule: 'MustRunAsNonRoot'
+  seLinux:
+    rule: 'RunAsAny'
+  fsGroup:
+    rule: 'RunAsAny'
+```
+
+== Troubleshooting Common Issues
+
+=== Resource Claim Issues
+
+==== Stuck Resource Claims
+```bash
+#!/bin/bash
+# Troubleshoot stuck resource claims
+
+echo "=== Troubleshooting Stuck Resource Claims ==="
+
+# Find claims stuck in Pending/Provisioning
+oc get resourceclaims -A | awk '$7 == "Pending" || $7 == "Provisioning" {print $1, $2, $6, $7}' | while read namespace name age status; do
+  echo "Investigating stuck claim: $namespace/$name (Status: $status, Age: $age)"
+
+  # Check claim details
+  oc describe resourceclaim $name -n $namespace
+
+  # Check related AnarchySubject
+  subject=$(oc get resourceclaim $name -n $namespace -o jsonpath='{.status.resources[0].name}')
+  if [ ! -z "$subject" ]; then
+    echo "Checking AnarchySubject: $subject"
+    oc describe anarchysubject $subject -n $namespace
+  fi
+
+  # Check Poolboy status
+  echo "Checking Poolboy logs..."
+  oc logs -n poolboy deployment/poolboy --tail=20 | grep -i $name
+done
+```
+
+==== Provision Failures
+```bash
+#!/bin/bash
+# Investigate provision failures
+
+echo "=== Investigating Provision Failures ==="
+
+# Find failed resource claims
+oc get resourceclaims -A | grep Failed | while read namespace name status age; do
+  echo "Analyzing failed claim: $namespace/$name"
+
+  # Get failure details
+  oc get resourceclaim $name -n $namespace -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}'
+
+  # Check operator logs
+  echo "Checking operator logs..."
+  oc logs -n anarchy-operator deployment/anarchy-operator --tail=50 | grep -i $name
+
+  # Check for common issues
+  echo "Checking for quota issues..."
+  oc describe resourcequota -n $namespace
+done
+```
+
+=== Operator Issues
+
+==== Operator Recovery
+```bash
+#!/bin/bash
+# Operator recovery procedures
+
+OPERATOR=${1:-"all"}
+
+echo "=== Operator Recovery - $OPERATOR ==="
+
+case $OPERATOR in
+  "agnosticv"|"all")
+    echo "Recovering AgnosticV Operator..."
+    oc delete pods -n babylon-agnosticv-operator -l app=babylon-agnosticv-operator
+    oc wait --for=condition=Ready pod -l app=babylon-agnosticv-operator -n babylon-agnosticv-operator --timeout=300s
+    ;;
+
+  "poolboy"|"all")
+    echo "Recovering Poolboy Operator..."
+    oc delete pods -n poolboy -l app=poolboy
+    oc wait --for=condition=Ready pod -l app=poolboy -n poolboy --timeout=300s
+    ;;
+
+  "anarchy"|"all")
+    echo "Recovering Anarchy Operator..."
+    oc delete pods -n anarchy-operator -l app=anarchy-operator
+    oc wait --for=condition=Ready pod -l app=anarchy-operator -n anarchy-operator --timeout=300s
+    ;;
+esac
+
+echo "Operator recovery completed for: $OPERATOR"
+```
+
+=== Performance Issues
+
+==== Database Performance Tuning
+```sql
+-- Database performance analysis queries
+
+-- Check slow queries
+SELECT query, mean_time, calls, total_time
+FROM pg_stat_statements
+ORDER BY total_time DESC
+LIMIT 10;
+
+-- Check index usage
+SELECT schemaname, tablename, attname, n_distinct, correlation
+FROM pg_stats
+WHERE schemaname = 'public'
+ORDER BY n_distinct DESC;
+
+-- Check table sizes
+SELECT schemaname, tablename,
+       pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as size
+FROM pg_tables
+WHERE schemaname = 'public'
+ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
+
+-- Database maintenance
+ANALYZE;
+VACUUM ANALYZE;
+REINDEX DATABASE babylon;
+```
+
+==== API Performance Optimization
+```bash
+#!/bin/bash
+# API performance optimization
+
+echo "=== API Performance Optimization ==="
+
+# Check API response times
+echo "Checking API response times..."
+oc logs -n babylon-catalog deployment/catalog-api --tail=1000 | grep -E "duration.*[5-9][0-9]{2,}ms" | head -10
+
+# Monitor resource usage
+echo "Checking API resource usage..."
+oc top pods -n babylon-catalog --sort-by=cpu
+oc top pods -n babylon-catalog --sort-by=memory
+
+# Check database connections
+echo "Checking database connection pool..."
+oc exec -n babylon-catalog deployment/postgresql -- psql -U postgres -c "SELECT count(*) as active_connections FROM pg_stat_activity WHERE state = 'active';"
+
+# Redis cache performance
+echo "Checking Redis cache performance..."
+oc exec -n babylon-catalog deployment/redis -- redis-cli info stats | grep -E "(keyspace_hits|keyspace_misses|hit_rate)"
+```
+
+This comprehensive operations guide provides the foundation for maintaining a healthy, secure, and performant Babylon Platform deployment. Regular execution of these procedures will ensure optimal platform operation and early detection of potential issues.

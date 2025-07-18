@@ -1,0 +1,861 @@
+= Integration Points
+
+== Overview
+
+The Babylon Platform's architecture is built around well-defined integration points that enable loosely coupled, yet coordinated operation of all components. This document details how different systems communicate, share data, and coordinate workflows across the platform.
+
+== Integration Architecture Patterns
+
+=== Event-Driven Integration
+
+The platform primarily uses event-driven integration patterns through Kubernetes native mechanisms:
+
+[source,mermaid]
+----
+graph LR
+    A[Component A] -->|Creates/Updates| B[K8s Resource]
+    B -->|Watches| C[Component B]
+    C -->|Status Update| B
+    B -->|Event| D[Component C]
+
+    style B fill:#e1f5fe
+    style A fill:#f3e5f5
+    style C fill:#e8f5e8
+    style D fill:#fff3e0
+----
+
+**Key Characteristics**:
+* Asynchronous communication through Kubernetes events
+* Declarative state management via custom resources
+* Eventual consistency model
+* Automatic retry and reconciliation
+
+=== API Gateway Pattern
+
+User interfaces and external systems access platform functionality through standardized APIs:
+
+[source,mermaid]
+----
+graph TB
+    subgraph "External Clients"
+        UI[Web UIs]
+        CLI[CLI Tools]
+        EXT[External Systems]
+    end
+
+    subgraph "API Layer"
+        GW[API Gateway]
+        AUTH[OAuth Proxy]
+        RATE[Rate Limiter]
+    end
+
+    subgraph "Platform APIs"
+        CAT[Catalog API]
+        ADM[Admin API]
+        RAT[Ratings API]
+    end
+
+    subgraph "Core Platform"
+        K8S[Kubernetes API]
+        OPS[Operators]
+    end
+
+    UI --> GW
+    CLI --> GW
+    EXT --> GW
+
+    GW --> AUTH
+    AUTH --> RATE
+    RATE --> CAT
+    RATE --> ADM
+    RATE --> RAT
+
+    CAT --> K8S
+    ADM --> K8S
+    RAT --> K8S
+
+    K8S --> OPS
+----
+
+== Core Integration Points
+
+=== Kubernetes API Server Integration
+
+All platform components integrate through the Kubernetes API server as the central coordination point:
+
+```yaml
+# Example: Resource creation triggers operator reconciliation
+apiVersion: babylon.gpte.redhat.com/v1
+kind: CatalogItem
+metadata:
+  name: aws-blank-open-environment
+  namespace: babylon-catalog-prod
+  labels:
+    babylon.gpte.redhat.com/category: workshops
+spec:
+  displayName: "AWS Blank Open Environment"
+  description:
+    content: "Open AWS environment for custom configurations"
+    format: "html"
+  parameters:
+  - name: aws_region
+    openAPIV3Schema:
+      type: string
+      enum: ["us-east-1", "us-west-2", "eu-west-1"]
+status:
+  phase: "Ready"
+  conditions:
+  - type: "ResourceProviderReady"
+    status: "True"
+    lastTransitionTime: "2023-01-01T12:00:00Z"
+```
+
+==== Operator Watch Patterns
+
+```python
+# Standard operator watch pattern
+@kopf.on.create('babylon.gpte.redhat.com', 'v1', 'catalogitems')
+@kopf.on.update('babylon.gpte.redhat.com', 'v1', 'catalogitems')
+async def handle_catalog_item_change(spec, status, namespace, name, **kwargs):
+    """React to CatalogItem changes and update dependent resources"""
+
+    # Parse catalog item specification
+    catalog_item = CatalogItem(spec=spec, status=status)
+
+    # Create or update ResourceProvider
+    resource_provider = await create_resource_provider(catalog_item)
+
+    # Update status to reflect changes
+    await update_catalog_item_status(namespace, name, {
+        'phase': 'Ready',
+        'resourceProvider': resource_provider.metadata.name
+    })
+```
+
+=== AgnosticV → Catalog Manager Integration
+
+The AgnosticV operator synchronizes Git repositories and creates catalog items that the Catalog Manager processes:
+
+[source,mermaid]
+----
+sequenceDiagram
+    participant Git as Git Repository
+    participant AgnosticV as AgnosticV Operator
+    participant K8s as Kubernetes API
+    participant CatalogMgr as Catalog Manager
+    participant Poolboy as Poolboy Operator
+
+    Git->>AgnosticV: Webhook/Poll trigger
+    AgnosticV->>Git: Fetch repository content
+    Git-->>AgnosticV: Component definitions
+
+    loop For each component
+        AgnosticV->>K8s: Create/Update AgnosticVComponent
+        AgnosticV->>K8s: Create/Update CatalogItem
+    end
+
+    K8s->>CatalogMgr: CatalogItem events
+    CatalogMgr->>CatalogMgr: Process metadata
+    CatalogMgr->>K8s: Update annotations
+
+    K8s->>Poolboy: CatalogItem events
+    Poolboy->>K8s: Create ResourceProvider
+----
+
+```python
+# AgnosticV to CatalogItem conversion
+async def create_catalog_item_from_component(component: AgnosticVComponent):
+    """Convert AgnosticV component to Babylon CatalogItem"""
+
+    catalog_item_spec = {
+        'displayName': component.spec.get('display_name', component.metadata.name),
+        'description': {
+            'content': component.spec.get('description', ''),
+            'format': 'html'
+        },
+        'category': component.spec.get('category', 'demos'),
+        'keywords': component.spec.get('keywords', []),
+        'parameters': convert_agnosticv_vars_to_parameters(
+            component.spec.get('agnosticv_vars', {})
+        ),
+        'provisionTimeEstimate': component.spec.get('provision_time', 'PT30M'),
+        'agnosticvRepo': {
+            'name': component.spec.repo_name,
+            'contextDir': component.spec.context_dir,
+            'ref': component.spec.repo_ref
+        }
+    }
+
+    catalog_item = {
+        'apiVersion': 'babylon.gpte.redhat.com/v1',
+        'kind': 'CatalogItem',
+        'metadata': {
+            'name': component.metadata.name,
+            'namespace': component.metadata.namespace,
+            'labels': {
+                'gpte.redhat.com/agnosticv-component': component.metadata.name,
+                'babylon.gpte.redhat.com/category': catalog_item_spec['category']
+            }
+        },
+        'spec': catalog_item_spec
+    }
+
+    await create_k8s_resource(catalog_item)
+```
+
+=== Catalog API → Poolboy Integration
+
+The Catalog API creates ResourceClaims that Poolboy processes for resource lifecycle management:
+
+[source,mermaid]
+----
+sequenceDiagram
+    participant UI as Catalog UI
+    participant API as Catalog API
+    participant K8s as Kubernetes API
+    participant Poolboy as Poolboy Operator
+    participant Anarchy as Anarchy Operator
+    participant Tower as Ansible Tower
+
+    UI->>API: POST /api/catalog/v1/requests
+    API->>API: Validate request parameters
+    API->>K8s: Create ResourceClaim
+    K8s-->>API: ResourceClaim created
+    API-->>UI: Request confirmation
+
+    K8s->>Poolboy: ResourceClaim event
+    Poolboy->>K8s: Find/Create ResourceProvider
+    Poolboy->>K8s: Allocate ResourceHandle
+    Poolboy->>K8s: Create AnarchySubject
+
+    K8s->>Anarchy: AnarchySubject event
+    Anarchy->>Tower: Submit provisioning job
+    Tower-->>Anarchy: Job status updates
+    Anarchy->>K8s: Update AnarchySubject status
+
+    K8s->>Poolboy: Status update event
+    Poolboy->>K8s: Update ResourceHandle status
+    Poolboy->>K8s: Update ResourceClaim status
+
+    K8s->>API: Status change event
+    API->>UI: Push status update
+----
+
+```typescript
+// Catalog API ResourceClaim creation
+export async function createServiceRequest(
+  catalogItem: CatalogItem,
+  parameters: ServiceRequestParameters,
+  userInfo: UserInfo
+): Promise<ResourceClaim> {
+
+  // Generate unique GUID for tracking
+  const guid = generateGUID();
+
+  // Create ResourceClaim specification
+  const resourceClaimSpec = {
+    resources: [{
+      provider: {
+        apiVersion: 'poolboy.gpte.redhat.com/v1',
+        kind: 'ResourceProvider',
+        name: catalogItem.spec.resourceProvider?.name || catalogItem.metadata.name,
+        namespace: catalogItem.spec.resourceProvider?.namespace || 'poolboy'
+      },
+      template: {
+        spec: {
+          vars: {
+            ...parameters,
+            guid: guid,
+            user_info: userInfo
+          }
+        }
+      }
+    }],
+    lifespan: {
+      default: catalogItem.spec.lifespan?.default || 'PT8H',
+      maximum: catalogItem.spec.lifespan?.maximum || 'P7D',
+      relativeMaximum: catalogItem.spec.lifespan?.relativeMaximum || 'P30D'
+    }
+  };
+
+  // Create ResourceClaim in Kubernetes
+  const resourceClaim = await k8sClient.create({
+    apiVersion: 'poolboy.gpte.redhat.com/v1',
+    kind: 'ResourceClaim',
+    metadata: {
+      name: `guid-${guid}`,
+      namespace: userInfo.namespace,
+      labels: {
+        'babylon.gpte.redhat.com/catalogItem': catalogItem.metadata.name,
+        'babylon.gpte.redhat.com/catalogItemNamespace': catalogItem.metadata.namespace,
+        'babylon.gpte.redhat.com/requester': userInfo.username
+      },
+      annotations: {
+        'babylon.gpte.redhat.com/requesterEmail': userInfo.email
+      }
+    },
+    spec: resourceClaimSpec
+  });
+
+  return resourceClaim;
+}
+```
+
+=== Workshop Manager → Lab UI Manager Integration
+
+Workshop Manager coordinates with Lab UI Manager to provide user-specific lab interfaces:
+
+[source,mermaid]
+----
+sequenceDiagram
+    participant User as Workshop User
+    participant Workshop as Workshop Manager
+    participant K8s as Kubernetes API
+    participant LabUI as Lab UI Manager
+    participant Route as OpenShift Route
+
+    User->>Workshop: Access workshop URL
+    Workshop->>K8s: Get/Create WorkshopUserAssignment
+    K8s-->>Workshop: Assignment details
+
+    Workshop->>K8s: Create BookbagDeployment request
+    K8s->>LabUI: BookbagDeployment event
+
+    LabUI->>K8s: Create Deployment
+    LabUI->>K8s: Create Service
+    LabUI->>K8s: Create Route
+
+    K8s-->>LabUI: Resources created
+    LabUI->>K8s: Update BookbagDeployment status
+
+    K8s->>Workshop: Status update
+    Workshop->>User: Redirect to lab interface
+    User->>Route: Access lab environment
+----
+
+```python
+# Workshop Manager integration with Lab UI Manager
+@kopf.on.create('babylon.gpte.redhat.com', 'v1', 'workshopuserassignments')
+async def handle_user_assignment(spec, metadata, namespace, name, **kwargs):
+    """Create user-specific lab interface when user is assigned"""
+
+    assignment = WorkshopUserAssignment(metadata=metadata, spec=spec)
+    workshop_name = assignment.spec.workshop.name
+
+    # Get workshop configuration
+    workshop = await get_workshop(namespace, workshop_name)
+
+    # Create BookbagDeployment for user lab interface
+    if workshop.spec.bookbag:
+        bookbag_deployment = {
+            'apiVersion': 'babylon.gpte.redhat.com/v1',
+            'kind': 'BookbagDeployment',
+            'metadata': {
+                'name': f"{name}-bookbag",
+                'namespace': namespace,
+                'labels': {
+                    'babylon.gpte.redhat.com/workshop': workshop_name,
+                    'babylon.gpte.redhat.com/user': assignment.spec.user.email
+                }
+            },
+            'spec': {
+                'bookbag': workshop.spec.bookbag,
+                'user': assignment.spec.user,
+                'resources': assignment.status.resources,
+                'vars': {
+                    **workshop.spec.vars,
+                    **assignment.spec.vars
+                }
+            }
+        }
+
+        await create_k8s_resource(bookbag_deployment)
+
+        # Update assignment with lab interface URL
+        await update_assignment_status(namespace, name, {
+            'labUserInterfaceUrl': f"https://{name}-bookbag.{cluster_domain}",
+            'phase': 'Ready'
+        })
+```
+
+=== Cost Tracker → Anarchy Integration
+
+Cost Tracker monitors AnarchySubjects to track AWS resource costs:
+
+[source,mermaid]
+----
+sequenceDiagram
+    participant Anarchy as Anarchy Operator
+    participant K8s as Kubernetes API
+    participant CostTracker as Cost Tracker
+    participant AWS as AWS Cost Explorer
+
+    Anarchy->>K8s: Update AnarchySubject with AWS resources
+    K8s->>CostTracker: AnarchySubject status change
+
+    CostTracker->>CostTracker: Extract AWS resource tags
+    CostTracker->>AWS: Query cost data by tags
+    AWS-->>CostTracker: Cost information
+
+    CostTracker->>K8s: Create/Update CostTrackerState
+    CostTracker->>K8s: Create AWSSandboxCost resources
+
+    Note over CostTracker: Aggregate costs by project/user
+    CostTracker->>K8s: Generate CostReport
+----
+
+```python
+# Cost Tracker AnarchySubject monitoring
+@kopf.on.field('anarchy.gpte.redhat.com', 'v1', 'anarchysubjects',
+               field='status.resources')
+async def track_anarchy_subject_costs(old, new, namespace, name, **kwargs):
+    """Track costs for AWS resources managed by AnarchySubject"""
+
+    if not new:
+        return
+
+    anarchy_subject = await get_anarchy_subject(namespace, name)
+    aws_resources = extract_aws_resources(new)
+
+    if not aws_resources:
+        return
+
+    # Create cost tracking tags
+    cost_tags = {
+        'babylon:anarchy-subject': f"{namespace}/{name}",
+        'babylon:requester': anarchy_subject.metadata.annotations.get(
+            'babylon.gpte.redhat.com/requester', 'unknown'
+        ),
+        'babylon:guid': anarchy_subject.metadata.labels.get(
+            'babylon.gpte.redhat.com/guid', 'unknown'
+        )
+    }
+
+    # Create AWSSandboxCost resource for tracking
+    aws_sandbox_cost = {
+        'apiVersion': 'babylon.gpte.redhat.com/v1',
+        'kind': 'AWSSandboxCost',
+        'metadata': {
+            'name': f"cost-{namespace}-{name}",
+            'namespace': 'babylon-cost-tracker'
+        },
+        'spec': {
+            'anarchySubject': {
+                'name': name,
+                'namespace': namespace
+            },
+            'awsAccount': aws_resources['account_id'],
+            'resources': aws_resources['resources'],
+            'costTags': cost_tags,
+            'trackingPeriod': {
+                'start': anarchy_subject.metadata.creationTimestamp,
+                'end': None  # Will be set when resources are destroyed
+            }
+        }
+    }
+
+    await create_k8s_resource(aws_sandbox_cost)
+```
+
+=== Notifier Integration Points
+
+The Notifier operator integrates with multiple components to provide event-driven notifications:
+
+[source,mermaid]
+----
+graph LR
+    subgraph "Event Sources"
+        RC[ResourceClaim]
+        WS[Workshop]
+        AS[AnarchySubject]
+        CI[CatalogItem]
+    end
+
+    subgraph "Notifier"
+        NR[Notification Rules]
+        NT[Notification Templates]
+        NC[Notification Channels]
+    end
+
+    subgraph "Delivery Channels"
+        EMAIL[Email/SMTP]
+        SLACK[Slack]
+        WEBHOOK[Webhooks]
+        REDIS[Redis Queue]
+    end
+
+    RC -->|Status Changes| NR
+    WS -->|Lifecycle Events| NR
+    AS -->|Provisioning Events| NR
+    CI -->|Incidents| NR
+
+    NR --> NT
+    NT --> NC
+
+    NC --> EMAIL
+    NC --> SLACK
+    NC --> WEBHOOK
+    NC --> REDIS
+----
+
+```python
+# Notifier event handling for multiple resource types
+@kopf.on.field('poolboy.gpte.redhat.com', 'v1', 'resourceclaims',
+               field='status.phase')
+async def notify_resource_claim_status_change(old, new, namespace, name, **kwargs):
+    """Send notifications for ResourceClaim status changes"""
+
+    if old == new:
+        return
+
+    resource_claim = await get_resource_claim(namespace, name)
+
+    # Determine notification type based on status
+    notification_type = None
+    if new == 'Ready':
+        notification_type = 'provision-complete'
+    elif new == 'Failed':
+        notification_type = 'provision-failed'
+    elif new == 'Deleting':
+        notification_type = 'deletion-started'
+
+    if notification_type:
+        await send_notification(
+            notification_type=notification_type,
+            resource=resource_claim,
+            template_vars={
+                'resource_name': name,
+                'resource_namespace': namespace,
+                'requester': resource_claim.metadata.annotations.get(
+                    'babylon.gpte.redhat.com/requester'
+                ),
+                'status': new,
+                'timestamp': datetime.utcnow().isoformat()
+            }
+        )
+
+async def send_notification(notification_type: str, resource: dict, template_vars: dict):
+    """Send notification using configured channels and templates"""
+
+    # Find matching notification rules
+    rules = await find_notification_rules(notification_type, resource)
+
+    for rule in rules:
+        # Render notification content using template
+        template = await get_notification_template(rule.spec.template)
+        content = await render_template(template, template_vars)
+
+        # Send via configured channels
+        for channel in rule.spec.channels:
+            await deliver_notification(channel, content)
+```
+
+== External System Integration
+
+=== Ansible Tower/AAP Integration
+
+Deep integration with Ansible Tower for automation execution:
+
+[source,mermaid]
+----
+sequenceDiagram
+    participant Anarchy as Anarchy Operator
+    participant Tower as Ansible Tower
+    participant AWS as AWS Services
+    participant Git as Git Repository
+
+    Note over Anarchy,Tower: Job Submission
+    Anarchy->>Tower: Submit job template
+    Tower->>Git: Fetch playbooks and roles
+    Tower->>AWS: Execute infrastructure automation
+
+    Note over Tower,AWS: Real-time Updates
+    Tower->>Anarchy: Job status updates
+    Tower->>Anarchy: Job artifacts and outputs
+
+    Note over Anarchy: Resource Tracking
+    Anarchy->>Anarchy: Update AnarchySubject status
+    Anarchy->>Anarchy: Store resource information
+----
+
+```python
+# Anarchy Tower integration configuration
+class TowerIntegration:
+    def __init__(self, tower_config: dict):
+        self.base_url = tower_config['url']
+        self.username = tower_config['username']
+        self.password = tower_config['password']
+        self.verify_ssl = tower_config.get('verify_ssl', True)
+
+    async def submit_job(self, anarchy_subject: AnarchySubject) -> str:
+        """Submit job to Ansible Tower"""
+
+        job_template = anarchy_subject.spec.governor_spec.get('job_template')
+        extra_vars = {
+            **anarchy_subject.spec.vars,
+            'anarchy_subject_name': anarchy_subject.metadata.name,
+            'anarchy_subject_namespace': anarchy_subject.metadata.namespace
+        }
+
+        response = await self.tower_client.post(
+            f'/api/v2/job_templates/{job_template}/launch/',
+            json={
+                'extra_vars': extra_vars,
+                'job_tags': anarchy_subject.spec.action,
+                'inventory': anarchy_subject.spec.inventory
+            }
+        )
+
+        return response['id']
+
+    async def get_job_status(self, job_id: str) -> dict:
+        """Get job status from Tower"""
+        response = await self.tower_client.get(f'/api/v2/jobs/{job_id}/')
+        return {
+            'status': response['status'],
+            'started': response['started'],
+            'finished': response['finished'],
+            'artifacts': response.get('artifacts', {}),
+            'stdout': response.get('stdout', '')
+        }
+```
+
+=== Git Repository Integration
+
+Continuous synchronization with Git repositories for configuration and content:
+
+```python
+# AgnosticV Git integration
+class GitRepositoryManager:
+    def __init__(self, repo_config: AgnosticVRepo):
+        self.repo_url = repo_config.spec.url
+        self.ref = repo_config.spec.ref
+        self.ssh_key = repo_config.spec.ssh_key
+        self.context_dir = repo_config.spec.context_dir
+
+    async def sync_repository(self) -> List[AgnosticVComponent]:
+        """Synchronize repository and parse components"""
+
+        # Clone or update repository
+        repo_path = await self.clone_or_update()
+
+        # Parse component definitions
+        components = []
+        component_dirs = await self.find_component_directories(repo_path)
+
+        for component_dir in component_dirs:
+            try:
+                component = await self.parse_component(component_dir)
+                components.append(component)
+            except Exception as e:
+                logger.error(f"Failed to parse component {component_dir}: {e}")
+
+        return components
+
+    async def handle_webhook(self, webhook_data: dict):
+        """Handle GitHub webhook for real-time updates"""
+
+        if webhook_data.get('ref') == f"refs/heads/{self.ref}":
+            # Repository updated, trigger sync
+            await self.sync_repository()
+
+        elif webhook_data.get('action') == 'opened' and 'pull_request' in webhook_data:
+            # Pull request opened, create temporary catalog items
+            pr_ref = webhook_data['pull_request']['head']['sha']
+            await self.create_pr_catalog_items(pr_ref)
+```
+
+=== Cloud Provider Integration
+
+Integration with multiple cloud providers through standardized interfaces:
+
+```python
+# Cloud provider abstraction
+class CloudProviderIntegration:
+    def __init__(self, provider_type: str, credentials: dict):
+        self.provider_type = provider_type
+        self.credentials = credentials
+
+    async def provision_resources(self, resource_spec: dict) -> dict:
+        """Provision resources based on specification"""
+
+        if self.provider_type == 'aws':
+            return await self.provision_aws_resources(resource_spec)
+        elif self.provider_type == 'azure':
+            return await self.provision_azure_resources(resource_spec)
+        elif self.provider_type == 'gcp':
+            return await self.provision_gcp_resources(resource_spec)
+        else:
+            raise ValueError(f"Unsupported provider: {self.provider_type}")
+
+    async def get_cost_data(self, resource_tags: dict, time_range: dict) -> dict:
+        """Retrieve cost data for resources"""
+
+        if self.provider_type == 'aws':
+            return await self.get_aws_costs(resource_tags, time_range)
+        # Add other providers as needed
+
+    async def provision_aws_resources(self, resource_spec: dict) -> dict:
+        """AWS-specific resource provisioning"""
+
+        session = boto3.Session(
+            aws_access_key_id=self.credentials['access_key'],
+            aws_secret_access_key=self.credentials['secret_key'],
+            region_name=resource_spec.get('region', 'us-east-1')
+        )
+
+        # Use CloudFormation or Terraform for infrastructure provisioning
+        # Return resource information for tracking
+        return {
+            'provider': 'aws',
+            'account_id': session.get_caller_identity()['Account'],
+            'region': resource_spec.get('region'),
+            'resources': []  # Will be populated by automation
+        }
+```
+
+== Data Flow Integration
+
+=== Resource Lifecycle Data Flow
+
+Complete data flow for resource lifecycle management:
+
+[source,mermaid]
+----
+flowchart TD
+    A[User Request] --> B[Catalog API]
+    B --> C[ResourceClaim]
+    C --> D[Poolboy]
+    D --> E{Pool Available?}
+
+    E -->|Yes| F[Allocate from Pool]
+    E -->|No| G[Create New Resource]
+
+    F --> H[ResourceHandle]
+    G --> I[AnarchySubject]
+    I --> J[Ansible Tower]
+    J --> K[Cloud Provider]
+    K --> L[Infrastructure]
+    L --> M[Update Status]
+    M --> H
+
+    H --> N[Update ResourceClaim]
+    N --> O[Notify User]
+
+    O --> P[User Access]
+    P --> Q[Usage Tracking]
+    Q --> R[Cost Allocation]
+
+    R --> S[Lifecycle End]
+    S --> T[Cleanup Resources]
+    T --> U[Return to Pool]
+----
+
+=== Event Propagation Patterns
+
+How events propagate through the system for coordination:
+
+```python
+# Event propagation example
+@kopf.on.field('anarchy.gpte.redhat.com', 'v1', 'anarchysubjects',
+               field='status.runHistory')
+async def propagate_anarchy_status_change(old, new, **kwargs):
+    """Propagate AnarchySubject status changes to dependent resources"""
+
+    anarchy_subject = kwargs['body']
+
+    # Find ResourceHandle that owns this AnarchySubject
+    resource_handle = await find_owning_resource_handle(anarchy_subject)
+
+    if resource_handle:
+        # Update ResourceHandle status
+        await update_resource_handle_status(resource_handle, {
+            'anarchySubjectStatus': anarchy_subject['status'],
+            'lastUpdate': datetime.utcnow().isoformat()
+        })
+
+        # Find ResourceClaim that owns the ResourceHandle
+        resource_claim = await find_owning_resource_claim(resource_handle)
+
+        if resource_claim:
+            # Update ResourceClaim status
+            await update_resource_claim_status(resource_claim, {
+                'resources': [{
+                    'name': resource_handle['metadata']['name'],
+                    'state': anarchy_subject['status']
+                }]
+            })
+
+            # Trigger notifications if appropriate
+            await trigger_status_notifications(resource_claim, anarchy_subject['status'])
+```
+
+== Security and Authentication Integration
+
+=== OAuth and RBAC Integration
+
+Unified authentication and authorization across all components:
+
+[source,mermaid]
+----
+graph TB
+    subgraph "Authentication Flow"
+        USER[User] --> OAUTH[OpenShift OAuth]
+        OAUTH --> TOKEN[JWT Token]
+        TOKEN --> PROXY[OAuth Proxy]
+    end
+
+    subgraph "Authorization"
+        PROXY --> RBAC[Kubernetes RBAC]
+        RBAC --> SA[Service Accounts]
+        SA --> PERMS[Component Permissions]
+    end
+
+    subgraph "Component Access"
+        PERMS --> CATAPI[Catalog API]
+        PERMS --> ADMAPI[Admin API]
+        PERMS --> K8SAPI[Kubernetes API]
+    end
+----
+
+```yaml
+# RBAC configuration for component integration
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: babylon-user
+rules:
+# ResourceClaim management
+- apiGroups: ["poolboy.gpte.redhat.com"]
+  resources: ["resourceclaims"]
+  verbs: ["create", "get", "list", "patch", "update", "watch", "delete"]
+  resourceNames: [] # Restricted by namespace RBAC
+
+# CatalogItem viewing
+- apiGroups: ["babylon.gpte.redhat.com"]
+  resources: ["catalogitems"]
+  verbs: ["get", "list", "watch"]
+
+# Workshop participation
+- apiGroups: ["babylon.gpte.redhat.com"]
+  resources: ["workshopuserassignments"]
+  verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: babylon-admin
+rules:
+# Full platform administration
+- apiGroups: ["*"]
+  resources: ["*"]
+  verbs: ["*"]
+
+# Special admin APIs
+- apiGroups: ["babylon.gpte.redhat.com"]
+  resources: ["*"]
+  verbs: ["*"]
+```
+
+The Babylon Platform's integration architecture provides a robust, scalable foundation for coordinating complex workflows while maintaining loose coupling between components. This enables the platform to evolve and scale while preserving system reliability and operational simplicity.

@@ -1,0 +1,663 @@
+= Developer Guide
+
+== Overview
+
+The Babylon Platform is designed with extensibility and developer productivity in mind. This guide provides comprehensive information for developers working on platform components, integrating with platform APIs, or extending platform functionality.
+
+== Development Philosophy
+
+=== Cloud-Native Principles
+The platform follows cloud-native development practices:
+
+* **Microservices Architecture**: Independent, loosely-coupled services
+* **Container-First**: All components containerized and Kubernetes-native
+* **API-Driven**: RESTful APIs with OpenAPI specifications
+* **Event-Driven**: Asynchronous communication via Kubernetes events
+* **Infrastructure as Code**: Configuration managed through Git and Helm
+
+=== Technology Stack
+* **Languages**: Python (operators), TypeScript/React (UIs), SQL (databases)
+* **Frameworks**: Kopf (operators), FastAPI (APIs), PatternFly (UIs)
+* **Infrastructure**: Kubernetes/OpenShift, Helm, Ansible
+* **External Systems**: Ansible Tower/AAP, AWS, Git repositories
+
+== Development Environment Setup
+
+=== Prerequisites
+
+==== Required Tools
+```bash
+# Container and Kubernetes tools
+podman or docker
+kubectl or oc (OpenShift CLI)
+helm
+
+# Development tools
+git
+python 3.8+
+node.js 16+
+npm or yarn
+
+# Optional but recommended
+odo (OpenShift development)
+ansible
+terraform
+```
+
+==== Local Cluster Setup
+For local development, we recommend one of these options:
+
+===== OpenShift Local (CRC)
+```bash
+# Download and install CRC
+curl -LO https://developers.redhat.com/content-gateway/rest/mirror/pub/openshift-v4/clients/crc/latest/crc-linux-amd64.tar.xz
+tar -xf crc-linux-amd64.tar.xz
+sudo mv crc-linux-*/crc /usr/local/bin/
+
+# Set up cluster
+crc setup
+crc start --memory 16384 --cpus 4
+
+# Login to cluster
+oc login -u developer -p developer https://api.crc.testing:6443
+```
+
+===== Kind (Kubernetes in Docker)
+```bash
+# Install kind
+curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.17.0/kind-linux-amd64
+chmod +x ./kind
+sudo mv ./kind /usr/local/bin/kind
+
+# Create cluster
+cat <<EOF | kind create cluster --config=-
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+  extraPortMappings:
+  - containerPort: 80
+    hostPort: 80
+  - containerPort: 443
+    hostPort: 443
+EOF
+```
+
+=== Component Development Workflows
+
+Each platform component supports standardized development workflows using `odo` for rapid iteration.
+
+==== Generic Development Pattern
+```bash
+# Clone repository
+git clone https://github.com/redhat-cop/babylon.git
+cd babylon/<component>
+
+# Create development namespace
+oc new-project babylon-<component>-dev
+
+# Install dependencies and RBAC
+helm template helm/ --include-crds --set deploy=false | oc apply -f -
+oc adm policy add-cluster-role-to-user babylon-<component> -z default
+
+# Start development
+odo dev --devfile devfile.yaml
+```
+
+=== Operator Development
+
+==== Kopf Framework
+Babylon operators use the Kopf framework for Kubernetes operator development:
+
+```python
+import kopf
+import kubernetes_asyncio
+import logging
+
+@kopf.on.startup()
+async def configure_operator(settings, **_):
+    """Configure operator on startup"""
+    # Set up Kubernetes client
+    kubernetes_asyncio.config.load_incluster_config()
+
+    # Configure logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+
+    # Configure operator settings
+    settings.persistence.finalizer = 'babylon.gpte.redhat.com/operator'
+
+@kopf.on.create('babylon.gpte.redhat.com', 'v1', 'catalogitems')
+async def create_catalog_item(spec, name, namespace, **kwargs):
+    """Handle CatalogItem creation"""
+    logging.info(f"Creating catalog item {name} in {namespace}")
+
+    # Implement creation logic
+    await process_catalog_item(spec)
+
+    return {'status': 'created'}
+
+@kopf.on.update('babylon.gpte.redhat.com', 'v1', 'catalogitems')
+async def update_catalog_item(spec, name, namespace, **kwargs):
+    """Handle CatalogItem updates"""
+    logging.info(f"Updating catalog item {name} in {namespace}")
+
+    # Implement update logic
+    await reconcile_catalog_item(spec)
+
+    return {'status': 'updated'}
+```
+
+==== Development Environment
+```bash
+# AgnosticV Operator example
+cd agnosticv-operator
+
+# Set up Python environment
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Development with odo
+odo dev --devfile devfile.yaml
+
+# Alternative: Run locally
+export KUBECONFIG=/path/to/kubeconfig
+python3 operator/operator.py
+```
+
+==== Testing Operators
+```bash
+# Unit tests
+python -m pytest tests/unit/ -v
+
+# Integration tests
+ansible-playbook test/playbook.yaml
+
+# Manual testing
+oc apply -f examples/agnosticv-repo.yaml
+oc logs deployment/babylon-agnosticv-operator -f
+```
+
+=== API Development
+
+==== FastAPI Framework
+Platform APIs use FastAPI for RESTful services:
+
+```python
+from fastapi import FastAPI, HTTPException, Depends
+from pydantic import BaseModel
+import kubernetes_asyncio
+
+app = FastAPI(title="Babylon Catalog API", version="1.0.0")
+
+class CatalogItemRequest(BaseModel):
+    name: str
+    description: str
+    parameters: dict
+
+@app.get("/api/catalog/v1/items")
+async def list_catalog_items():
+    """List available catalog items"""
+    k8s_client = kubernetes_asyncio.client.CustomObjectsApi()
+
+    try:
+        items = await k8s_client.list_cluster_custom_object(
+            group="babylon.gpte.redhat.com",
+            version="v1",
+            plural="catalogitems"
+        )
+        return {"items": items["items"]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/catalog/v1/order")
+async def order_catalog_item(request: CatalogItemRequest):
+    """Order a catalog item"""
+    # Implement ordering logic
+    resource_claim = {
+        "apiVersion": "poolboy.gpte.redhat.com/v1",
+        "kind": "ResourceClaim",
+        "metadata": {"name": request.name},
+        "spec": {"catalogItem": request.name}
+    }
+
+    # Create ResourceClaim
+    k8s_client = kubernetes_asyncio.client.CustomObjectsApi()
+    await k8s_client.create_namespaced_custom_object(
+        group="poolboy.gpte.redhat.com",
+        version="v1",
+        namespace="user-namespace",
+        plural="resourceclaims",
+        body=resource_claim
+    )
+
+    return {"status": "submitted", "request_id": request.name}
+```
+
+==== API Development Environment
+```bash
+# Catalog API example
+cd catalog/api
+
+# Set up Python environment
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Development server
+export KUBECONFIG=/path/to/kubeconfig
+export BABYLON_NAMESPACE=babylon-catalog-dev
+uvicorn app:app --reload --host 0.0.0.0 --port 8080
+
+# Test API
+curl http://localhost:8080/api/catalog/v1/items
+```
+
+=== UI Development
+
+==== React/TypeScript Frontend
+Platform UIs use React with TypeScript and PatternFly components:
+
+```typescript
+// src/components/CatalogItem.tsx
+import React, { useState, useEffect } from 'react';
+import {
+  Card,
+  CardTitle,
+  CardBody,
+  Button,
+  Spinner
+} from '@patternfly/react-core';
+
+interface CatalogItem {
+  name: string;
+  description: string;
+  category: string;
+}
+
+const CatalogItemCard: React.FC<{ item: CatalogItem }> = ({ item }) => {
+  const [isOrdering, setIsOrdering] = useState(false);
+
+  const handleOrder = async () => {
+    setIsOrdering(true);
+    try {
+      const response = await fetch('/api/catalog/v1/order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: item.name })
+      });
+
+      if (response.ok) {
+        // Handle successful order
+        console.log('Order submitted successfully');
+      }
+    } catch (error) {
+      console.error('Order failed:', error);
+    } finally {
+      setIsOrdering(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardTitle>{item.name}</CardTitle>
+      <CardBody>
+        <p>{item.description}</p>
+        <Button
+          variant="primary"
+          onClick={handleOrder}
+          isDisabled={isOrdering}
+        >
+          {isOrdering ? <Spinner size="sm" /> : 'Order'}
+        </Button>
+      </CardBody>
+    </Card>
+  );
+};
+```
+
+==== UI Development Environment
+```bash
+# Catalog UI example
+cd catalog/ui
+
+# Install dependencies
+npm install
+
+# Development server
+npm run start:dev
+
+# Build for production
+npm run build
+
+# Test
+npm run test
+```
+
+== API Integration
+
+=== Authentication
+All APIs use OpenShift OAuth for authentication:
+
+```typescript
+// API client with authentication
+class BabylonAPIClient {
+  private baseURL: string;
+  private token?: string;
+
+  constructor(baseURL: string) {
+    this.baseURL = baseURL;
+  }
+
+  async authenticate(): Promise<void> {
+    // Get token from OpenShift OAuth
+    const response = await fetch('/oauth/token', {
+      method: 'POST',
+      credentials: 'include'
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      this.token = data.access_token;
+    }
+  }
+
+  async request(endpoint: string, options: RequestInit = {}): Promise<any> {
+    const headers = {
+      'Content-Type': 'application/json',
+      ...options.headers
+    };
+
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
+
+    const response = await fetch(`${this.baseURL}${endpoint}`, {
+      ...options,
+      headers
+    });
+
+    if (!response.ok) {
+      throw new Error(`API request failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+}
+```
+
+=== Catalog API
+Primary API for catalog and resource management:
+
+```typescript
+interface CatalogClient {
+  // Catalog operations
+  listCatalogItems(): Promise<CatalogItem[]>;
+  getCatalogItem(name: string): Promise<CatalogItem>;
+
+  // Resource operations
+  createResourceClaim(request: ResourceClaimRequest): Promise<ResourceClaim>;
+  getResourceClaim(name: string): Promise<ResourceClaim>;
+  listResourceClaims(): Promise<ResourceClaim[]>;
+
+  // Workshop operations
+  createWorkshop(workshop: WorkshopRequest): Promise<Workshop>;
+  getWorkshop(name: string): Promise<Workshop>;
+}
+
+// Example usage
+const client = new BabylonAPIClient('https://catalog.babylon.example.com');
+await client.authenticate();
+
+const catalogItems = await client.request('/api/catalog/v1/items');
+const resourceClaim = await client.request('/api/catalog/v1/order', {
+  method: 'POST',
+  body: JSON.stringify({
+    name: 'openshift-workshop',
+    parameters: { user_count: 20 }
+  })
+});
+```
+
+=== Admin API
+Administrative functions and incident management:
+
+```typescript
+interface AdminClient {
+  // Incident management
+  listIncidents(status?: string): Promise<Incident[]>;
+  createIncident(incident: IncidentRequest): Promise<Incident>;
+  updateIncident(id: string, update: IncidentUpdate): Promise<Incident>;
+
+  // System management
+  getSystemStatus(): Promise<SystemStatus>;
+  listUsers(): Promise<User[]>;
+  manageUser(userId: string, action: UserAction): Promise<User>;
+}
+```
+
+=== Ratings API
+User feedback and bookmarking system:
+
+```typescript
+interface RatingsClient {
+  // Rating operations
+  rateItem(itemId: string, rating: number, comment?: string): Promise<Rating>;
+  getItemRating(itemId: string): Promise<AverageRating>;
+
+  // Bookmark operations
+  bookmarkItem(itemId: string): Promise<Bookmark>;
+  listBookmarks(): Promise<Bookmark[]>;
+  removeBookmark(itemId: string): Promise<void>;
+}
+```
+
+== Extension Points
+
+=== Custom Operators
+Develop custom operators for specialized functionality:
+
+```python
+# Custom operator example
+import kopf
+from babylon import Babylon
+
+@kopf.on.create('mycompany.com', 'v1', 'customresources')
+async def handle_custom_resource(spec, name, namespace, **kwargs):
+    """Handle custom resource creation"""
+
+    # Parse custom configuration
+    config = spec.get('configuration', {})
+
+    # Create corresponding Babylon resources
+    catalog_item = {
+        'apiVersion': 'babylon.gpte.redhat.com/v1',
+        'kind': 'CatalogItem',
+        'metadata': {
+            'name': f"custom-{name}",
+            'namespace': namespace
+        },
+        'spec': {
+            'displayName': config.get('displayName', name),
+            'description': config.get('description', ''),
+            'parameters': config.get('parameters', {})
+        }
+    }
+
+    # Create CatalogItem
+    await Babylon.create_resource(catalog_item)
+
+    return {'status': 'created'}
+```
+
+=== API Extensions
+Extend existing APIs with custom endpoints:
+
+```python
+from fastapi import APIRouter
+from catalog.api.app import app
+
+# Custom router
+custom_router = APIRouter(prefix="/api/custom/v1", tags=["custom"])
+
+@custom_router.get("/reports")
+async def generate_custom_report():
+    """Generate custom reporting data"""
+    # Implement custom logic
+    return {"report": "custom data"}
+
+# Register custom router
+app.include_router(custom_router)
+```
+
+=== UI Components
+Create custom UI components using PatternFly:
+
+```typescript
+// Custom component
+import React from 'react';
+import { Card, CardBody } from '@patternfly/react-core';
+
+interface CustomDashboardProps {
+  data: any[];
+}
+
+export const CustomDashboard: React.FC<CustomDashboardProps> = ({ data }) => {
+  return (
+    <Card>
+      <CardBody>
+        {/* Custom dashboard implementation */}
+        <h2>Custom Dashboard</h2>
+        {data.map(item => (
+          <div key={item.id}>{item.name}</div>
+        ))}
+      </CardBody>
+    </Card>
+  );
+};
+
+// Register component in catalog UI
+export { CustomDashboard } from './components/CustomDashboard';
+```
+
+=== Webhook Integration
+Integrate with external systems via webhooks:
+
+```python
+from fastapi import FastAPI, Request
+import json
+
+app = FastAPI()
+
+@app.post("/webhooks/github")
+async def github_webhook(request: Request):
+    """Handle GitHub webhook events"""
+    payload = await request.json()
+
+    if payload.get('action') == 'opened':
+        # Handle pull request opened
+        await handle_pr_opened(payload['pull_request'])
+    elif payload.get('action') == 'closed':
+        # Handle pull request closed
+        await handle_pr_closed(payload['pull_request'])
+
+    return {"status": "processed"}
+
+@app.post("/webhooks/slack")
+async def slack_webhook(request: Request):
+    """Handle Slack webhook events"""
+    payload = await request.json()
+
+    # Process Slack commands
+    if payload.get('command') == '/babylon':
+        return await handle_slack_command(payload)
+
+    return {"status": "ok"}
+```
+
+== Testing Strategies
+
+=== Unit Testing
+```python
+# Test operator logic
+import pytest
+from unittest.mock import Mock, patch
+from operator.catalogitem import CatalogItemHandler
+
+@pytest.fixture
+def mock_k8s_client():
+    return Mock()
+
+async def test_catalog_item_creation(mock_k8s_client):
+    """Test catalog item creation"""
+    handler = CatalogItemHandler(mock_k8s_client)
+
+    spec = {
+        'displayName': 'Test Item',
+        'description': 'Test Description'
+    }
+
+    result = await handler.create_catalog_item('test-item', 'test-ns', spec)
+
+    assert result['status'] == 'created'
+    mock_k8s_client.create_namespaced_custom_object.assert_called_once()
+```
+
+=== Integration Testing
+```bash
+# Run integration tests
+ansible-playbook test/integration/test-catalog.yaml \
+  -e cluster_url=$(oc whoami --show-server) \
+  -e cluster_token=$(oc whoami -t)
+```
+
+=== End-to-End Testing
+```typescript
+// UI E2E testing with Cypress
+describe('Catalog UI', () => {
+  it('should display catalog items', () => {
+    cy.visit('/catalog');
+    cy.get('[data-testid="catalog-items"]').should('be.visible');
+    cy.get('[data-testid="catalog-item"]').should('have.length.greaterThan', 0);
+  });
+
+  it('should order a catalog item', () => {
+    cy.visit('/catalog');
+    cy.get('[data-testid="catalog-item"]:first').click();
+    cy.get('[data-testid="order-button"]').click();
+    cy.get('[data-testid="order-confirmation"]').should('be.visible');
+  });
+});
+```
+
+== Best Practices
+
+=== Code Quality
+* Use type hints in Python and TypeScript
+* Follow PEP 8 for Python and ESLint rules for TypeScript
+* Write comprehensive tests with good coverage
+* Use descriptive variable and function names
+* Document complex business logic
+
+=== Security
+* Validate all inputs at API boundaries
+* Use parameterized queries for database operations
+* Implement proper authentication and authorization
+* Store secrets securely in Kubernetes secrets
+* Regular security scanning of dependencies
+
+=== Performance
+* Use async/await for I/O operations
+* Implement proper caching strategies
+* Monitor resource usage and optimize
+* Use connection pooling for databases
+* Implement rate limiting for APIs
+
+=== Documentation
+* Maintain up-to-date API documentation
+* Document architectural decisions
+* Provide runnable examples
+* Keep README files current
+* Use inline code comments for complex logic
+
+This developer guide provides the foundation for contributing to and extending the Babylon Platform while maintaining consistency with established patterns and practices.

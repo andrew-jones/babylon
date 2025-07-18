@@ -1,0 +1,349 @@
+= Components Overview
+
+== Introduction
+
+The Babylon Platform is composed of multiple specialized components that work together to provide comprehensive workshop management and infrastructure provisioning capabilities. Each component is designed with a specific purpose and follows cloud-native principles for scalability, reliability, and maintainability.
+
+== Component Categories
+
+=== Core Operators
+Kubernetes operators that manage custom resources and implement the platform's core functionality:
+
+* **link:operators/agnosticv-operator.adoc[AgnosticV Operator]**: Manages catalog definitions from Git repositories
+* **link:operators/anarchy-operator.adoc[Anarchy Operator]**: Provides stateless automation execution
+* **link:operators/poolboy-operator.adoc[Poolboy Operator]**: Manages resource lifecycle and pooling
+* **link:operators/workshop-manager.adoc[Workshop Manager]**: Orchestrates workshop delivery
+* **link:operators/lab-ui-manager.adoc[Lab UI Manager]**: Manages lab user interfaces
+* **link:operators/cost-tracker.adoc[Cost Tracker]**: Monitors AWS infrastructure costs
+* **link:operators/catalog-manager.adoc[Catalog Manager]**: Manages catalog item lifecycle
+* **link:operators/notifier.adoc[Notifier]**: Provides event-driven notifications
+
+=== APIs and Services
+REST APIs and backend services that provide functionality to user interfaces and external systems:
+
+* **link:apis/catalog-api.adoc[Catalog API]**: Service catalog backend with resource management
+* **link:apis/admin-api.adoc[Admin API]**: Administrative functions and incident management
+* **link:apis/ratings-api.adoc[Ratings API]**: User feedback and bookmarking system
+
+=== User Interfaces
+Web-based interfaces for different user personas:
+
+* **link:uis/catalog-ui.adoc[Catalog UI]**: Service catalog frontend for end users
+* **link:uis/admin-ui.adoc[Admin UI]**: Administrative interface for platform operators
+
+== Component Architecture Patterns
+
+=== Operator Pattern
+All core operators follow the Kubernetes operator pattern:
+
+```
+Watch Resources → Reconcile State → Update Status → Generate Events
+```
+
+**Key Characteristics**:
+* Declarative configuration through custom resources
+* Continuous reconciliation of desired vs actual state
+* Event-driven processing with automatic retries
+* Status reporting for observability
+
+=== API Design
+REST APIs follow consistent design patterns:
+
+```
+/api/{service}/{version}/{resource}
+```
+
+**Standards**:
+* OpenAPI 3.0 specifications
+* JSON request/response bodies
+* RESTful resource modeling
+* Consistent error responses
+* Authentication via OpenShift OAuth
+
+=== Container Architecture
+All components are containerized with standard practices:
+
+```dockerfile
+FROM registry.redhat.io/ubi8/ubi-minimal:latest
+USER 1001
+EXPOSE 8080
+CMD ["/usr/local/bin/component"]
+```
+
+**Standards**:
+* Red Hat Universal Base Images (UBI)
+* Non-root user execution
+* Health check endpoints
+* Structured logging (JSON)
+* Prometheus metrics
+
+== Component Interaction Patterns
+
+=== Event-Driven Communication
+
+[source,mermaid]
+----
+graph LR
+    A[User Request] --> B[Catalog API]
+    B --> C[ResourceClaim]
+    C --> D[Poolboy]
+    D --> E[AnarchySubject]
+    E --> F[Anarchy]
+    F --> G[Ansible Tower]
+
+    style A fill:#e1f5fe
+    style G fill:#f3e5f5
+----
+
+Components communicate primarily through Kubernetes events and custom resource status updates.
+
+=== Direct API Integration
+
+[source,mermaid]
+----
+graph TB
+    A[External Systems] --> B[APIs]
+    B --> C[Kubernetes API]
+    C --> D[Operators]
+
+    subgraph "External Systems"
+        E[Ansible Tower]
+        F[AWS APIs]
+        G[Git Repositories]
+        H[SMTP Servers]
+    end
+
+    subgraph "APIs"
+        I[Catalog API]
+        J[Admin API]
+        K[Ratings API]
+    end
+
+    E --> D
+    F --> D
+    G --> D
+    H --> D
+----
+
+Direct API calls are used for external system integration and user interface communication.
+
+== Resource Hierarchy
+
+=== Core Resource Types
+
+```
+CatalogItem (Catalog Definition)
+├── ResourceProvider (Poolboy Configuration)
+├── ResourcePool (Pre-provisioned Resources)
+├── ResourceClaim (User Request)
+│   └── ResourceHandle (Poolboy Management)
+│       └── AnarchySubject (Automation Execution)
+└── Workshop (Workshop Definition)
+    ├── WorkshopProvision (Bulk Provisioning)
+    │   └── ResourceClaim (Workshop Resources)
+    └── WorkshopUserAssignment (User-to-Resource Mapping)
+        └── BookbagDeployment (Lab Interface)
+```
+
+=== Custom Resource Definitions
+
+==== Babylon Domain (babylon.gpte.redhat.com)
+* `CatalogItem`: Service catalog definitions
+* `Workshop`: Workshop configurations
+* `WorkshopProvision`: Bulk provisioning requests
+* `WorkshopUserAssignment`: User assignments
+* `BookbagBuild`: Lab interface builds
+* `BookbagDeployment`: Lab interface deployments
+
+==== AgnosticV Domain (gpte.redhat.com)
+* `AgnosticVRepo`: Git repository configurations
+* `AgnosticVComponent`: Parsed component definitions
+
+==== Poolboy Domain (poolboy.gpte.redhat.com)
+* `ResourceClaim`: Resource requests
+* `ResourceHandle`: Resource management
+* `ResourceProvider`: Resource type definitions
+* `ResourcePool`: Pre-provisioned resource pools
+
+==== Anarchy Domain (anarchy.gpte.redhat.com)
+* `AnarchyGovernor`: Automation workflow definitions
+* `AnarchySubject`: Individual automation instances
+* `AnarchyAction`: Specific automation actions
+
+== Component Dependencies
+
+=== Internal Dependencies
+
+[source,mermaid]
+----
+graph TD
+    AgnosticV[AgnosticV Operator] --> Catalog[Catalog Manager]
+    Catalog --> Workshop[Workshop Manager]
+    Workshop --> LabUI[Lab UI Manager]
+    Workshop --> Poolboy[Poolboy Operator]
+    Poolboy --> Anarchy[Anarchy Operator]
+
+    CatalogAPI[Catalog API] --> Poolboy
+    AdminAPI[Admin API] --> Workshop
+
+    Notifier --> Workshop
+    Notifier --> Poolboy
+    Notifier --> Anarchy
+
+    CostTracker --> Anarchy
+----
+
+=== External Dependencies
+
+[source,mermaid]
+----
+graph LR
+    Platform[Babylon Platform] --> OpenShift[OpenShift/Kubernetes]
+    Platform --> Tower[Ansible Tower/AAP]
+    Platform --> AWS[Amazon Web Services]
+    Platform --> Git[Git Repositories]
+    Platform --> LDAP[LDAP/Active Directory]
+    Platform --> SMTP[SMTP Server]
+    Platform --> Database[PostgreSQL Database]
+----
+
+== Deployment Architecture
+
+=== Namespace Organization
+
+```
+babylon-config              # AgnosticV operator and central configuration
+├── agnosticv-operator      # AgnosticV operator deployment
+├── agnosticv-repos         # Git repository configurations
+└── catalog-items           # Generated catalog items
+
+babylon-anarchy             # Anarchy operator and automation execution
+├── anarchy-operator        # Anarchy operator deployment
+├── anarchy-runners         # Automation execution pods
+└── anarchy-subjects        # Automation workloads
+
+poolboy                     # Poolboy operator and resource management
+├── poolboy-operator        # Poolboy operator deployment
+├── resource-providers      # Resource type definitions
+├── resource-pools          # Pre-provisioned resources
+└── resource-handles        # Active resource management
+
+babylon-workshop-manager    # Workshop orchestration
+├── workshop-manager        # Workshop manager deployment
+├── workshops               # Workshop definitions
+├── workshop-provisions     # Bulk provisioning
+└── user-assignments        # User-to-resource mappings
+
+babylon-catalog-*           # Catalog interfaces (per environment)
+├── catalog-api             # Catalog API deployment
+├── catalog-ui              # Catalog UI deployment
+├── oauth-proxy             # Authentication proxy
+└── redis                   # Response caching
+
+babylon-admin               # Administrative interface
+├── admin-api               # Admin API deployment
+├── admin-ui                # Admin UI deployment
+└── database                # PostgreSQL database
+
+babylon-ratings             # Ratings and feedback
+├── ratings-api             # Ratings API deployment
+└── database                # PostgreSQL database
+
+babylon-notifier            # Notification services
+├── notifier                # Notifier deployment
+└── redis                   # Notification queue
+
+babylon-cost-tracker        # Cost monitoring
+└── cost-tracker            # Cost tracker deployment
+
+babylon-lab-ui-manager      # Lab interface management
+└── lab-ui-manager          # Lab UI manager deployment
+```
+
+=== Scaling Characteristics
+
+==== Stateless Components (Horizontally Scalable)
+* Catalog API
+* Admin API
+* Ratings API
+* All operator replicas (with leader election)
+
+==== Stateful Components (Vertically Scalable)
+* PostgreSQL databases
+* Redis instances
+* Anarchy runner pods
+
+==== Auto-Scaling Components
+* Workshop provisions (based on demand)
+* Resource pools (based on utilization)
+* Lab interface deployments (per user)
+
+== Monitoring and Observability
+
+=== Health Check Endpoints
+All components expose standard health endpoints:
+
+```
+GET /health/live      # Liveness probe
+GET /health/ready     # Readiness probe
+GET /metrics          # Prometheus metrics
+```
+
+=== Key Metrics
+Each component provides specific metrics:
+
+* **Operators**: Resource reconciliation rates, error counts, queue depths
+* **APIs**: Request latency, response codes, active connections
+* **Provisioning**: Success rates, provisioning time, resource utilization
+
+=== Logging Standards
+All components use structured JSON logging:
+
+```json
+{
+  "timestamp": "2023-01-01T12:00:00Z",
+  "level": "INFO",
+  "component": "agnosticv-operator",
+  "message": "Reconciling AgnosticVRepo",
+  "resource": "agnosticv-repo/example",
+  "namespace": "babylon-config"
+}
+```
+
+== Configuration Management
+
+=== Helm Charts
+Each component is deployed via Helm charts with:
+
+* Environment-specific values files
+* ConfigMap generation
+* Secret management
+* Resource customization
+
+=== Environment Variables
+Standard environment variables across components:
+
+```bash
+# Kubernetes API Configuration
+KUBECONFIG=/var/run/secrets/kubernetes.io/serviceaccount
+
+# Component Configuration
+COMPONENT_NAME=agnosticv-operator
+NAMESPACE=babylon-config
+LOG_LEVEL=INFO
+METRICS_PORT=8080
+
+# External System Configuration
+ANARCHY_API_GROUP=anarchy.gpte.redhat.com
+POOLBOY_API_GROUP=poolboy.gpte.redhat.com
+```
+
+=== Configuration Validation
+All components validate configuration at startup:
+
+* Required environment variables
+* External system connectivity
+* RBAC permissions
+* Custom resource availability
+
+This modular architecture enables the Babylon Platform to provide comprehensive workshop management capabilities while maintaining clear separation of concerns and operational simplicity.

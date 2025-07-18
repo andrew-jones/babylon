@@ -1,0 +1,342 @@
+= Data Flow Diagrams
+
+== Overview
+
+This document illustrates the key data flows through the Babylon platform, showing how different types of requests are processed from initiation to completion. Understanding these flows is essential for troubleshooting, monitoring, and optimizing the platform.
+
+== Catalog Item Request Lifecycle
+
+=== Individual Service Request Flow
+
+This flow shows how an end user requests a service from the catalog:
+
+[source,mermaid]
+----
+sequenceDiagram
+    participant User
+    participant CatalogUI as Catalog UI
+    participant CatalogAPI as Catalog API
+    participant K8s as Kubernetes API
+    participant Poolboy
+    participant Anarchy
+    participant Tower as Ansible Tower
+    participant AWS
+
+    User->>CatalogUI: Browse catalog
+    CatalogUI->>CatalogAPI: GET /api/catalog/items
+    CatalogAPI->>K8s: List CatalogItems
+    K8s-->>CatalogAPI: CatalogItem resources
+    CatalogAPI-->>CatalogUI: Catalog data
+    CatalogUI-->>User: Display catalog
+
+    User->>CatalogUI: Request service
+    CatalogUI->>CatalogAPI: POST /api/catalog/order
+    CatalogAPI->>K8s: Create ResourceClaim
+    K8s-->>CatalogAPI: ResourceClaim created
+    CatalogAPI-->>CatalogUI: Request submitted
+    CatalogUI-->>User: Confirmation
+
+    K8s->>Poolboy: ResourceClaim event
+    Poolboy->>K8s: Create ResourceHandle
+    Poolboy->>K8s: Create AnarchySubject
+    K8s->>Anarchy: AnarchySubject event
+    Anarchy->>Tower: Submit job
+    Tower->>AWS: Provision resources
+    AWS-->>Tower: Resources created
+    Tower-->>Anarchy: Job completed
+    Anarchy->>K8s: Update AnarchySubject status
+    K8s->>Poolboy: Status update event
+    Poolboy->>K8s: Update ResourceHandle status
+    Poolboy->>K8s: Update ResourceClaim status
+    K8s->>CatalogAPI: ResourceClaim status change
+    CatalogAPI-->>User: Notify completion
+----
+
+=== Resource Pool Management Flow
+
+This flow shows how resource pools are managed for faster provisioning:
+
+[source,mermaid]
+----
+sequenceDiagram
+    participant Admin
+    participant K8s as Kubernetes API
+    participant Poolboy
+    participant Anarchy
+    participant Tower as Ansible Tower
+
+    Admin->>K8s: Create ResourcePool
+    K8s->>Poolboy: ResourcePool event
+
+    loop Pre-provision resources
+        Poolboy->>K8s: Create ResourceHandle
+        Poolboy->>K8s: Create AnarchySubject
+        K8s->>Anarchy: AnarchySubject event
+        Anarchy->>Tower: Submit pre-provision job
+        Tower-->>Anarchy: Job completed
+        Anarchy->>K8s: Update AnarchySubject status
+        K8s->>Poolboy: Status update
+        Poolboy->>K8s: Update ResourceHandle status
+    end
+
+    Note over Poolboy: Pool maintained at target size
+
+    K8s->>Poolboy: New ResourceClaim
+    Poolboy->>Poolboy: Find available ResourceHandle
+    Poolboy->>K8s: Bind ResourceHandle to ResourceClaim
+    Poolboy->>K8s: Update ResourceClaim status
+----
+
+== Workshop Management Flow
+
+=== Workshop Creation and Provisioning
+
+This flow shows how workshops are created and bulk provisioned:
+
+[source,mermaid]
+----
+sequenceDiagram
+    participant Instructor
+    participant AdminUI as Admin UI
+    participant K8s as Kubernetes API
+    participant WorkshopMgr as Workshop Manager
+    participant Poolboy
+    participant LabUIMgr as Lab UI Manager
+
+    Instructor->>AdminUI: Create workshop
+    AdminUI->>K8s: Create Workshop resource
+    K8s->>WorkshopMgr: Workshop event
+
+    Instructor->>AdminUI: Create workshop provision
+    AdminUI->>K8s: Create WorkshopProvision
+    K8s->>WorkshopMgr: WorkshopProvision event
+
+    WorkshopMgr->>WorkshopMgr: Calculate required resources
+
+    loop For each required resource
+        WorkshopMgr->>K8s: Create ResourceClaim
+        K8s->>Poolboy: ResourceClaim event
+        Poolboy->>Poolboy: Allocate or provision resource
+        Poolboy->>K8s: Update ResourceClaim status
+        K8s->>WorkshopMgr: Status update
+        WorkshopMgr->>K8s: Create WorkshopUserAssignment
+    end
+
+    WorkshopMgr->>K8s: Update WorkshopProvision status
+    K8s->>LabUIMgr: WorkshopUserAssignment events
+    LabUIMgr->>K8s: Create BookbagDeployment resources
+----
+
+=== User Assignment and Lab Access
+
+This flow shows how users are assigned to workshop resources:
+
+[source,mermaid]
+----
+sequenceDiagram
+    participant User
+    participant WorkshopUI as Workshop UI
+    participant K8s as Kubernetes API
+    participant WorkshopMgr as Workshop Manager
+    participant LabUIMgr as Lab UI Manager
+
+    User->>WorkshopUI: Access workshop URL
+    WorkshopUI->>K8s: Get Workshop resource
+    K8s-->>WorkshopUI: Workshop details
+
+    alt User not assigned
+        WorkshopUI->>K8s: Find available WorkshopUserAssignment
+        K8s->>WorkshopMgr: Assignment request
+        WorkshopMgr->>K8s: Update WorkshopUserAssignment
+        K8s->>LabUIMgr: Assignment update event
+        LabUIMgr->>K8s: Create user-specific lab interface
+    end
+
+    WorkshopUI->>K8s: Get user assignment
+    K8s-->>WorkshopUI: Assignment details
+    WorkshopUI-->>User: Redirect to lab interface
+
+    User->>LabInterface: Access lab
+    LabInterface-->>User: Lab environment
+----
+
+== Catalog Management Flow
+
+=== AgnosticV Repository Synchronization
+
+This flow shows how catalog items are synchronized from Git repositories:
+
+[source,mermaid]
+----
+sequenceDiagram
+    participant Git as Git Repository
+    participant K8s as Kubernetes API
+    participant AgnosticV as AgnosticV Operator
+    participant CatalogMgr as Catalog Manager
+
+    Git->>AgnosticV: Webhook/polling trigger
+    AgnosticV->>Git: Fetch repository updates
+    Git-->>AgnosticV: Repository content
+
+    AgnosticV->>AgnosticV: Parse component definitions
+
+    loop For each component
+        AgnosticV->>K8s: Create/Update AgnosticVComponent
+        K8s->>AgnosticV: Component processed
+        AgnosticV->>K8s: Create/Update CatalogItem
+    end
+
+    K8s->>CatalogMgr: CatalogItem events
+    CatalogMgr->>CatalogMgr: Process catalog metadata
+    CatalogMgr->>K8s: Update CatalogItem annotations
+----
+
+=== GitHub Pull Request Integration
+
+This flow shows how pull requests are integrated for catalog testing:
+
+[source,mermaid]
+----
+sequenceDiagram
+    participant Developer
+    participant GitHub
+    participant AgnosticV as AgnosticV Operator
+    participant K8s as Kubernetes API
+
+    Developer->>GitHub: Create pull request
+    GitHub->>AgnosticV: Webhook notification
+    AgnosticV->>GitHub: Fetch PR content
+    GitHub-->>AgnosticV: PR files
+
+    AgnosticV->>K8s: Create temporary AgnosticVComponent
+    AgnosticV->>K8s: Create temporary CatalogItem
+    K8s-->>AgnosticV: Resources created
+
+    Note over AgnosticV: PR resources available for testing
+
+    Developer->>GitHub: Merge/close PR
+    GitHub->>AgnosticV: Webhook notification
+    AgnosticV->>K8s: Delete temporary resources
+----
+
+== Notification Flow
+
+=== Event-Driven Notifications
+
+This flow shows how the notification system processes events:
+
+[source,mermaid]
+----
+sequenceDiagram
+    participant K8s as Kubernetes API
+    participant Notifier
+    participant Redis
+    participant SMTP
+
+    K8s->>Notifier: Resource state change event
+    Notifier->>Notifier: Evaluate notification rules
+
+    alt Notification required
+        Notifier->>Notifier: Generate notification content
+        Notifier->>Redis: Queue notification
+        Redis-->>Notifier: Queued
+
+        Notifier->>Redis: Dequeue notification
+        Redis-->>Notifier: Notification data
+        Notifier->>SMTP: Send email
+        SMTP-->>Notifier: Email sent
+        Notifier->>Redis: Mark as sent
+    end
+----
+
+== Cost Tracking Flow
+
+=== AWS Cost Monitoring
+
+This flow shows how AWS costs are tracked and allocated:
+
+[source,mermaid]
+----
+sequenceDiagram
+    participant K8s as Kubernetes API
+    participant CostTracker as Cost Tracker
+    participant AWS as AWS Cost Explorer
+    participant Database
+
+    K8s->>CostTracker: AnarchySubject with AWS resources
+    CostTracker->>CostTracker: Extract AWS resource tags
+    CostTracker->>AWS: Query cost data
+    AWS-->>CostTracker: Cost information
+    CostTracker->>Database: Store cost allocation
+    CostTracker->>K8s: Update resource with cost data
+----
+
+== Error Handling and Recovery
+
+=== Failure Recovery Patterns
+
+Common failure scenarios and recovery mechanisms:
+
+[source,mermaid]
+----
+graph TD
+    A[Resource Request] --> B{Resource Available?}
+    B -->|Yes| C[Immediate Allocation]
+    B -->|No| D[Queue for Provisioning]
+
+    D --> E{Provisioning Success?}
+    E -->|Yes| F[Resource Allocated]
+    E -->|No| G[Retry Logic]
+
+    G --> H{Max Retries?}
+    H -->|No| E
+    H -->|Yes| I[Mark as Failed]
+
+    I --> J[Send Notification]
+    J --> K[Admin Intervention]
+
+    C --> L[Monitor Resource Health]
+    F --> L
+    L --> M{Health Check Pass?}
+    M -->|Yes| N[Continue Operation]
+    M -->|No| O[Trigger Recovery]
+
+    O --> P[Attempt Auto-Recovery]
+    P --> Q{Recovery Success?}
+    Q -->|Yes| N
+    Q -->|No| K
+----
+
+== Performance Optimization Points
+
+=== Caching Strategies
+
+Key caching points in the data flow:
+
+1. **Catalog API Response Caching**: Frequently accessed catalog data cached in Redis
+2. **Resource Pool Pre-allocation**: Resources pre-provisioned for immediate availability
+3. **Template Caching**: Ansible playbook and template caching in AgnosticV operator
+4. **Status Update Batching**: Resource status updates batched for efficiency
+
+=== Asynchronous Processing
+
+Long-running operations handled asynchronously:
+
+1. **Resource Provisioning**: Infrastructure provisioning via Ansible Tower
+2. **Bulk Workshop Provisioning**: Large workshop provisions processed in batches
+3. **Cost Data Collection**: AWS cost data collected on scheduled intervals
+4. **Notification Delivery**: Email notifications queued and processed asynchronously
+
+== Monitoring and Observability
+
+=== Key Metrics Collection Points
+
+Important metrics are collected at various points in the data flow:
+
+- **Request Latency**: Time from resource request to availability
+- **Provisioning Success Rate**: Success/failure rates for resource provisioning
+- **Pool Utilization**: Resource pool usage and availability metrics
+- **Workshop Completion Rate**: Workshop participant completion statistics
+- **Cost Per Resource**: Average cost allocation per resource type
+
+This comprehensive view of data flows enables effective troubleshooting, performance optimization, and capacity planning for the Babylon platform.

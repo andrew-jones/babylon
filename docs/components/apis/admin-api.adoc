@@ -1,0 +1,751 @@
+= Admin API
+
+== Overview
+
+The Admin API provides administrative functions for platform management, incident tracking, user support, and operational oversight. It serves the Admin UI and provides programmatic access to administrative operations.
+
+== API Base URL
+
+```
+https://admin.babylon.example.com/api/admin
+```
+
+== Authentication
+
+All Admin API endpoints require administrative privileges and use the same OAuth authentication as other platform APIs:
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  https://admin.babylon.example.com/api/admin/incidents
+```
+
+== Incident Management
+
+=== List Incidents
+
+==== Get All Incidents
+Retrieve incidents with filtering and pagination support.
+
+```http
+GET /api/admin/incidents
+```
+
+**Query Parameters**:
+* `status` (string): Filter by incident status (open, in_progress, resolved, closed)
+* `interface` (string): Filter by user interface (catalog, admin, workshop)
+* `severity` (string): Filter by severity (low, medium, high, critical)
+* `assigned_to` (string): Filter by assigned team or user
+* `created_after` (datetime): Filter incidents created after date
+* `limit` (integer): Maximum number of incidents to return (default: 50)
+* `offset` (integer): Number of incidents to skip for pagination
+
+**Example Request**:
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://admin.babylon.example.com/api/admin/incidents?status=open&severity=high&limit=20"
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "v1",
+  "kind": "IncidentList",
+  "metadata": {
+    "timestamp": "2023-01-01T12:00:00Z",
+    "requestId": "req-12345"
+  },
+  "items": [
+    {
+      "id": 12345,
+      "title": "User unable to provision OpenShift workshop",
+      "description": "User johndoe reports repeated failures when attempting to provision openshift-fundamentals workshop",
+      "status": "open",
+      "severity": "high",
+      "category": "provisioning",
+      "assignedTo": "platform-team",
+      "reportedBy": "johndoe@example.com",
+      "createdAt": "2023-01-01T10:30:00Z",
+      "updatedAt": "2023-01-01T11:45:00Z",
+      "tags": ["provisioning", "workshop", "openshift"],
+      "affectedUsers": ["johndoe@example.com"],
+      "relatedResources": [
+        {
+          "type": "CatalogItem",
+          "name": "openshift-fundamentals",
+          "namespace": "babylon-catalog-workshops"
+        },
+        {
+          "type": "ResourceClaim",
+          "name": "openshift-workshop-abc123",
+          "namespace": "user-johndoe-workspace"
+        }
+      ],
+      "escalation": {
+        "level": 1,
+        "escalatedAt": "2023-01-01T11:30:00Z",
+        "escalatedTo": "platform-team"
+      },
+      "metrics": {
+        "responseTime": "15m",
+        "resolutionTime": null,
+        "reopenCount": 0
+      }
+    }
+  ],
+  "pagination": {
+    "limit": 20,
+    "offset": 0,
+    "total": 156,
+    "hasMore": true
+  }
+}
+```
+
+=== Get Incident Details
+
+==== Retrieve Specific Incident
+Get detailed information about a specific incident.
+
+```http
+GET /api/admin/incidents/{incidentId}
+```
+
+**Path Parameters**:
+* `incidentId` (integer): Unique incident identifier
+
+**Example Response**:
+```json
+{
+  "apiVersion": "v1",
+  "kind": "Incident",
+  "metadata": {
+    "id": 12345,
+    "createdAt": "2023-01-01T10:30:00Z",
+    "updatedAt": "2023-01-01T11:45:00Z"
+  },
+  "spec": {
+    "title": "User unable to provision OpenShift workshop",
+    "description": "User johndoe reports repeated failures when attempting to provision openshift-fundamentals workshop. Error message indicates AWS quota exceeded.",
+    "category": "provisioning",
+    "severity": "high",
+    "priority": "P2",
+    "reportedBy": "johndoe@example.com",
+    "assignedTo": "platform-team",
+    "tags": ["provisioning", "workshop", "openshift", "aws-quota"],
+    "affectedUsers": ["johndoe@example.com", "instructor-jane@example.com"],
+    "relatedResources": [
+      {
+        "type": "CatalogItem",
+        "name": "openshift-fundamentals",
+        "namespace": "babylon-catalog-workshops",
+        "uuid": "550e8400-e29b-41d4-a716-446655440000"
+      }
+    ],
+    "userData": {
+      "username": "johndoe",
+      "namespace": "user-johndoe-workspace",
+      "catalogItem": "openshift-fundamentals",
+      "errorCode": "AWS_QUOTA_EXCEEDED",
+      "region": "us-east-1"
+    }
+  },
+  "status": {
+    "phase": "open",
+    "conditions": [
+      {
+        "type": "Reported",
+        "status": "True",
+        "lastTransitionTime": "2023-01-01T10:30:00Z",
+        "reason": "UserReported",
+        "message": "Incident reported by user via catalog interface"
+      },
+      {
+        "type": "Assigned",
+        "status": "True",
+        "lastTransitionTime": "2023-01-01T10:35:00Z",
+        "reason": "AutoAssigned",
+        "message": "Automatically assigned to platform-team based on category"
+      }
+    ],
+    "escalation": {
+      "level": 1,
+      "escalatedAt": "2023-01-01T11:30:00Z",
+      "escalatedTo": "platform-team",
+      "nextEscalation": "2023-01-01T13:30:00Z"
+    },
+    "metrics": {
+      "responseTime": "15m",
+      "timeToFirstResponse": "5m",
+      "resolutionTime": null,
+      "reopenCount": 0,
+      "lastActivity": "2023-01-01T11:45:00Z"
+    },
+    "comments": [
+      {
+        "id": 1,
+        "author": "johndoe@example.com",
+        "timestamp": "2023-01-01T10:30:00Z",
+        "text": "I've tried provisioning the OpenShift fundamentals workshop 3 times and it fails each time with a quota error.",
+        "type": "user_comment"
+      },
+      {
+        "id": 2,
+        "author": "platform-team@example.com",
+        "timestamp": "2023-01-01T10:35:00Z",
+        "text": "Investigating AWS quota limits for us-east-1 region. This appears to be affecting multiple users.",
+        "type": "internal_note"
+      },
+      {
+        "id": 3,
+        "author": "platform-team@example.com",
+        "timestamp": "2023-01-01T11:45:00Z",
+        "text": "Escalating to AWS team for quota increase. ETA for resolution: 2 hours.",
+        "type": "status_update"
+      }
+    ]
+  }
+}
+```
+
+=== Create Incident
+
+==== Submit New Incident
+Create a new incident for tracking and resolution.
+
+```http
+POST /api/admin/incidents
+```
+
+**Request Body**:
+```json
+{
+  "title": "Workshop provision failures for multiple users",
+  "description": "Multiple users reporting provision failures for OpenShift workshops in us-east-1 region",
+  "category": "provisioning",
+  "severity": "high",
+  "priority": "P2",
+  "reportedBy": "admin@example.com",
+  "assignedTo": "platform-team",
+  "tags": ["provisioning", "workshop", "aws", "us-east-1"],
+  "affectedUsers": [
+    "user1@example.com",
+    "user2@example.com",
+    "user3@example.com"
+  ],
+  "relatedResources": [
+    {
+      "type": "CatalogItem",
+      "name": "openshift-fundamentals",
+      "namespace": "babylon-catalog-workshops"
+    }
+  ],
+  "userData": {
+    "region": "us-east-1",
+    "errorPattern": "AWS_QUOTA_EXCEEDED",
+    "affectedClusters": ["cluster-1", "cluster-2"]
+  }
+}
+```
+
+**Response**:
+```json
+{
+  "id": 12346,
+  "status": "created",
+  "assignedTo": "platform-team",
+  "estimatedResolution": "2023-01-01T14:00:00Z",
+  "ticketUrl": "/admin/incidents/12346"
+}
+```
+
+=== Update Incident
+
+==== Modify Incident Details
+Update incident status, assignment, or add comments.
+
+```http
+PATCH /api/admin/incidents/{incidentId}
+```
+
+**Request Body**:
+```json
+{
+  "status": "in_progress",
+  "assignedTo": "aws-team",
+  "severity": "critical",
+  "comments": [
+    {
+      "text": "AWS quota increased. Testing provision workflow now.",
+      "author": "aws-team@example.com",
+      "type": "status_update"
+    }
+  ],
+  "escalation": {
+    "level": 2,
+    "escalatedTo": "aws-team"
+  },
+  "metadata": {
+    "estimatedResolution": "2023-01-01T15:00:00Z"
+  }
+}
+```
+
+=== Close Incident
+
+==== Mark Incident as Resolved
+Close an incident with resolution details.
+
+```http
+POST /api/admin/incidents/{incidentId}/close
+```
+
+**Request Body**:
+```json
+{
+  "resolution": "AWS quota increased from 100 to 200 vCPUs in us-east-1 region",
+  "resolutionCategory": "external_dependency",
+  "preventionMeasures": "Implemented proactive quota monitoring",
+  "followUpRequired": true,
+  "followUpActions": [
+    "Set up automated quota alerts",
+    "Review capacity planning process"
+  ],
+  "satisfactionSurvey": {
+    "sendToReporter": true,
+    "sendToAffectedUsers": true
+  }
+}
+```
+
+== Workshop Support
+
+=== Workshop Support Dashboard
+
+==== Get Workshop Support Information
+Retrieve real-time workshop support data for operational oversight.
+
+```http
+GET /api/admin/workshop/support
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "v1",
+  "kind": "WorkshopSupport",
+  "metadata": {
+    "timestamp": "2023-01-01T12:00:00Z",
+    "refreshInterval": "30s"
+  },
+  "activeWorkshops": [
+    {
+      "name": "openshift-fundamentals-jan2023",
+      "namespace": "user-instructor-jane-20230101",
+      "instructor": "jane@example.com",
+      "displayName": "OpenShift Fundamentals - January 2023",
+      "status": "active",
+      "participants": {
+        "registered": 25,
+        "active": 23,
+        "completed": 0,
+        "issues": 2
+      },
+      "startTime": "2023-01-01T09:00:00Z",
+      "endTime": "2023-01-01T17:00:00Z",
+      "remainingTime": "4h15m",
+      "resources": {
+        "healthy": 23,
+        "unhealthy": 2,
+        "provisioning": 0
+      },
+      "supportMetrics": {
+        "openTickets": 1,
+        "avgResponseTime": "3m",
+        "lastIssue": "2023-01-01T11:30:00Z"
+      }
+    }
+  ],
+  "platformStatus": {
+    "overall": "healthy",
+    "provisioning": {
+      "status": "healthy",
+      "avgTime": "8m30s",
+      "successRate": 98.5
+    },
+    "capacity": {
+      "utilizationPercent": 73,
+      "availableSlots": 127,
+      "queuedRequests": 5
+    }
+  },
+  "recentIssues": [
+    {
+      "incidentId": 12345,
+      "workshop": "openshift-fundamentals-jan2023",
+      "user": "student5@example.com",
+      "issue": "Cannot access lab interface",
+      "status": "investigating",
+      "createdAt": "2023-01-01T11:30:00Z"
+    }
+  ],
+  "supportQueue": {
+    "totalRequests": 3,
+    "avgWaitTime": "2m15s",
+    "requests": [
+      {
+        "id": "REQ-001",
+        "type": "environment_reset",
+        "user": "student3@example.com",
+        "workshop": "openshift-fundamentals-jan2023",
+        "priority": "medium",
+        "waitTime": "1m30s"
+      }
+    ]
+  }
+}
+```
+
+=== Workshop Operations
+
+==== Extend Workshop
+Extend workshop duration for active sessions.
+
+```http
+POST /api/admin/workshop/{namespace}/{workshopName}/extend
+```
+
+**Request Body**:
+```json
+{
+  "additionalHours": 2,
+  "reason": "Extended due to technical difficulties",
+  "notifyParticipants": true,
+  "extendResources": true
+}
+```
+
+==== Reset Workshop Environment
+Reset environments for specific workshop participants.
+
+```http
+POST /api/admin/workshop/{namespace}/{workshopName}/reset
+```
+
+**Request Body**:
+```json
+{
+  "usernames": ["student1", "student2"],
+  "resetType": "full", // "full", "partial", "lab-only"
+  "reason": "Environment corruption",
+  "notifyUsers": true,
+  "preserveData": false
+}
+```
+
+== User Management
+
+=== User Information
+
+==== Get User Details
+Retrieve comprehensive user information for support purposes.
+
+```http
+GET /api/admin/users/{username}
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "v1",
+  "kind": "UserInfo",
+  "metadata": {
+    "username": "johndoe",
+    "uid": "user-12345"
+  },
+  "spec": {
+    "profile": {
+      "displayName": "John Doe",
+      "email": "johndoe@example.com",
+      "department": "Engineering",
+      "manager": "jane@example.com"
+    },
+    "permissions": {
+      "roles": ["user", "instructor"],
+      "namespaces": [
+        "user-johndoe-workspace",
+        "user-instructor-johndoe-jan2023"
+      ],
+      "quotas": {
+        "maxConcurrentClaims": 10,
+        "maxLifespan": "7d",
+        "maxCost": "$500/month"
+      }
+    }
+  },
+  "status": {
+    "accountStatus": "active",
+    "lastLogin": "2023-01-01T08:30:00Z",
+    "currentUsage": {
+      "activeClaims": 3,
+      "totalCost": "$125.50",
+      "utilizationPercent": 30
+    },
+    "recentActivity": [
+      {
+        "timestamp": "2023-01-01T10:30:00Z",
+        "action": "provision_requested",
+        "resource": "openshift-fundamentals",
+        "status": "failed"
+      }
+    ],
+    "supportHistory": {
+      "totalIncidents": 2,
+      "openIncidents": 1,
+      "avgResolutionTime": "45m"
+    }
+  }
+}
+```
+
+=== User Actions
+
+==== Reset User Quota
+Reset or modify user resource quotas.
+
+```http
+POST /api/admin/users/{username}/quota/reset
+```
+
+**Request Body**:
+```json
+{
+  "quotaType": "monthly", // "daily", "weekly", "monthly"
+  "reason": "Quota exceeded due to workshop participation",
+  "notifyUser": true,
+  "newLimits": {
+    "maxConcurrentClaims": 15,
+    "maxCost": "$750/month"
+  }
+}
+```
+
+==== Extend User Resources
+Extend lifespan for user's active resources.
+
+```http
+POST /api/admin/users/{username}/resources/extend
+```
+
+**Request Body**:
+```json
+{
+  "resourceClaimNames": ["workshop-claim-1", "demo-claim-2"],
+  "additionalHours": 24,
+  "reason": "Extended for project completion",
+  "notifyUser": true
+}
+```
+
+== Platform Statistics
+
+=== Operational Metrics
+
+==== Get Platform Dashboard Data
+Retrieve comprehensive platform metrics for administrative oversight.
+
+```http
+GET /api/admin/metrics/dashboard
+```
+
+**Example Response**:
+```json
+{
+  "apiVersion": "v1",
+  "kind": "PlatformMetrics",
+  "metadata": {
+    "timestamp": "2023-01-01T12:00:00Z",
+    "period": "24h"
+  },
+  "usage": {
+    "totalUsers": 1250,
+    "activeUsers": 156,
+    "newUsers": 23,
+    "totalResourceClaims": 445,
+    "activeResourceClaims": 89,
+    "successfulProvisions": 423,
+    "failedProvisions": 22,
+    "successRate": 95.1
+  },
+  "capacity": {
+    "totalClusters": 12,
+    "healthyClusters": 11,
+    "totalNodes": 156,
+    "availableNodes": 67,
+    "utilizationPercent": 73.2,
+    "avgProvisionTime": "8m45s"
+  },
+  "workshops": {
+    "activeWorkshops": 8,
+    "totalParticipants": 234,
+    "completionRate": 87.3,
+    "avgRating": 4.2
+  },
+  "incidents": {
+    "openIncidents": 5,
+    "resolvedToday": 12,
+    "avgResolutionTime": "1h23m",
+    "escalatedIncidents": 1
+  },
+  "costs": {
+    "dailyCost": "$1,234.56",
+    "monthlyCost": "$28,901.23",
+    "costPerUser": "$23.15",
+    "topCostCenters": [
+      {"name": "workshops", "cost": "$567.89"},
+      {"name": "demos", "cost": "$234.56"}
+    ]
+  }
+}
+```
+
+== Error Responses
+
+=== Common Error Codes
+
+==== 400 Bad Request
+```json
+{
+  "error": {
+    "code": "INVALID_INCIDENT_DATA",
+    "message": "Invalid incident category provided",
+    "details": {
+      "field": "category",
+      "allowedValues": ["provisioning", "access", "performance", "configuration"],
+      "providedValue": "unknown"
+    }
+  }
+}
+```
+
+==== 403 Forbidden
+```json
+{
+  "error": {
+    "code": "INSUFFICIENT_ADMIN_PRIVILEGES",
+    "message": "User does not have administrative privileges",
+    "details": {
+      "requiredRole": "admin",
+      "userRoles": ["user", "instructor"]
+    }
+  }
+}
+```
+
+==== 404 Not Found
+```json
+{
+  "error": {
+    "code": "INCIDENT_NOT_FOUND",
+    "message": "Incident with specified ID does not exist",
+    "details": {
+      "incidentId": 99999
+    }
+  }
+}
+```
+
+== SDK Examples
+
+=== JavaScript/TypeScript
+```typescript
+import { AdminAPI } from '@babylon/admin-client';
+
+const api = new AdminAPI({
+  baseUrl: 'https://admin.babylon.example.com',
+  token: process.env.ADMIN_TOKEN
+});
+
+// List open incidents
+const incidents = await api.listIncidents({
+  status: 'open',
+  severity: 'high'
+});
+
+// Create new incident
+const incident = await api.createIncident({
+  title: 'Workshop provision failures',
+  category: 'provisioning',
+  severity: 'high',
+  description: 'Multiple users reporting failures',
+  assignedTo: 'platform-team'
+});
+
+// Update incident status
+await api.updateIncident(incident.id, {
+  status: 'in_progress',
+  comments: [{
+    text: 'Investigation started',
+    type: 'status_update'
+  }]
+});
+```
+
+=== Python
+```python
+from babylon_admin import AdminClient
+
+client = AdminClient(
+    base_url='https://admin.babylon.example.com',
+    token=os.environ['ADMIN_TOKEN']
+)
+
+# Get workshop support dashboard
+support_data = client.get_workshop_support()
+
+# Extend workshop
+client.extend_workshop(
+    namespace='user-instructor-jane-20230101',
+    workshop_name='openshift-fundamentals-jan2023',
+    additional_hours=2,
+    reason='Technical difficulties'
+)
+
+# Get platform metrics
+metrics = client.get_platform_metrics()
+print(f"Success rate: {metrics['usage']['successRate']}%")
+```
+
+=== curl Examples
+```bash
+# List incidents
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  "https://admin.babylon.example.com/api/admin/incidents?status=open"
+
+# Create incident
+curl -X POST \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "User unable to access lab",
+    "category": "access",
+    "severity": "medium",
+    "description": "User reports 403 error accessing lab interface"
+  }' \
+  "https://admin.babylon.example.com/api/admin/incidents"
+
+# Get workshop support data
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  "https://admin.babylon.example.com/api/admin/workshop/support"
+
+# Extend workshop
+curl -X POST \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "additionalHours": 2,
+    "reason": "Extended Q&A session"
+  }' \
+  "https://admin.babylon.example.com/api/admin/workshop/namespace/workshop-name/extend"
+```
+
+The Admin API provides comprehensive administrative capabilities for incident management, workshop support, user administration, and platform oversight, enabling effective operation and support of the Babylon Platform.

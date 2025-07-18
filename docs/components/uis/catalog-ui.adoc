@@ -1,0 +1,646 @@
+= Catalog UI
+
+== Overview
+
+The Catalog UI is the primary user-facing interface of the Babylon Platform, providing a comprehensive service catalog for end users to browse, discover, and request cloud infrastructure and workshop environments. Built with React and TypeScript, it offers an intuitive, responsive experience that scales from individual service requests to large workshop deployments.
+
+== Purpose and Responsibilities
+
+=== Primary Functions
+* **Service Discovery**: Browse and search through available catalog items
+* **Resource Ordering**: Request services with customizable parameters
+* **Service Management**: Monitor and manage active services and workshops
+* **Workshop Participation**: Access workshop environments and lab interfaces
+* **User Dashboard**: Personal view of active resources and requests
+
+=== Key Value Propositions
+* **Self-Service Provisioning**: Users can request complex environments without technical expertise
+* **Unified Interface**: Single interface for all service types (workshops, demos, development environments)
+* **Real-Time Status**: Live updates on resource provisioning and availability
+* **Multi-Tenant Support**: Secure access to organization-specific catalog namespaces
+
+== Architecture
+
+=== Component Structure
+
+```
+src/app/
+├── Catalog/                 # Main catalog functionality
+│   ├── Catalog.tsx          # Primary catalog interface
+│   ├── CatalogContent.tsx   # Catalog display logic
+│   ├── CatalogGridList.tsx  # Grid/list view renderer
+│   ├── CatalogItemCard.tsx  # Individual item display
+│   ├── CatalogItemDetails.tsx   # Item detail view
+│   ├── CatalogItemForm.tsx  # Service request form
+│   ├── CatalogRedirections.tsx # URL routing and filters
+│   ├── CatalogCategorySelector.tsx # Category filtering
+│   ├── CatalogLabelSelector.tsx    # Label-based filtering
+│   ├── CatalogNamespaceSelect.tsx  # Namespace selection
+│   └── catalog-utils.ts     # Utility functions
+├── Services/                # Service management
+│   ├── Services.tsx         # Service listing and management
+│   ├── ServicesItem.tsx     # Individual service details
+│   └── service-utils.ts     # Service utilities
+├── Workshops/               # Workshop management
+│   ├── WorkshopsItem.tsx    # Workshop details and controls
+│   └── workshops-utils.ts   # Workshop utilities
+├── Workshop/                # Workshop participant interface
+│   ├── Workshop.tsx         # Workshop access portal
+│   ├── WorkshopContent.tsx  # Workshop environment
+│   ├── WorkshopHeader.tsx   # Workshop navigation
+│   └── WorkshopLogin.tsx    # Workshop authentication
+├── AppLayout/               # Application layout
+│   ├── AppLayout.tsx        # Main layout wrapper
+│   └── Navigation.tsx       # Primary navigation
+└── components/              # Shared components
+    ├── Footer.tsx           # Application footer
+    ├── Header.tsx           # Application header
+    └── various utilities/   # Reusable UI components
+```
+
+=== Core Components
+
+==== Catalog Component
+The main catalog interface providing service discovery and filtering:
+
+```typescript
+interface CatalogProps {
+  userHasRequiredPropertiesToAccess: boolean;
+}
+
+const Catalog: React.FC<CatalogProps> = ({ userHasRequiredPropertiesToAccess }) => {
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { catalogNamespaces, groups, isAdmin } = useSession().getSession();
+
+  // Catalog state management
+  const [view, setView] = useState<'gallery' | 'list'>('gallery');
+  const [sortBy, setSortBy] = useState<SortOption>({ selected: 'Featured' });
+
+  // Filter state
+  const searchString = searchParams.get('search')?.trim();
+  const selectedCategory = searchParams.get('category');
+  const selectedLabels = useMemo(() =>
+    JSON.parse(searchParams.get('labels') || '{}'),
+    [searchParams]
+  );
+
+  // Fetch catalog items with caching
+  const { data: catalogItems, error } = useSWR(
+    apiPaths.CATALOG_ITEMS({ namespace: catalogNamespaceName }),
+    fetcher,
+    { refreshInterval: 30000 }
+  );
+
+  // Apply filters and search
+  const filteredItems = useMemo(() => {
+    return filterCatalogItems(catalogItems, {
+      searchString,
+      selectedCategory,
+      selectedLabels,
+      userGroups: groups,
+    });
+  }, [catalogItems, searchString, selectedCategory, selectedLabels, groups]);
+
+  return (
+    <Drawer isExpanded={openCatalogItem ? true : false}>
+      <DrawerContent
+        panelContent={
+          openCatalogItem ? (
+            <CatalogItemDetails
+              catalogItem={openCatalogItem}
+              onClose={closeCatalogItem}
+            />
+          ) : null
+        }
+      >
+        <CatalogContent
+          catalogItemsResult={filteredItems}
+          view={view}
+          onClearFilters={clearAllFilters}
+          userHasRequiredPropertiesToAccess={userHasRequiredPropertiesToAccess}
+        />
+      </DrawerContent>
+    </Drawer>
+  );
+};
+```
+
+==== CatalogItemForm Component
+Handles service request forms with dynamic parameter validation:
+
+```typescript
+interface CatalogItemFormProps {
+  catalogItem: CatalogItem;
+  onSubmit: (values: ServiceRequestValues) => Promise<void>;
+}
+
+const CatalogItemForm: React.FC<CatalogItemFormProps> = ({ catalogItem, onSubmit }) => {
+  const [formState, dispatch] = useReducer(formReducer, initialFormState);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Dynamic form validation based on catalog item parameters
+  const validationSchema = useMemo(() =>
+    buildValidationSchema(catalogItem.spec.parameters || []),
+    [catalogItem.spec.parameters]
+  );
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    setIsSubmitting(true);
+
+    try {
+      const values = validateFormValues(formState, validationSchema);
+      await onSubmit(values);
+    } catch (error) {
+      setFormError(error.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <Form onSubmit={handleSubmit}>
+      {catalogItem.spec.parameters?.map(parameter => (
+        <DynamicFormInput
+          key={parameter.name}
+          parameter={parameter}
+          value={formState[parameter.name]}
+          onChange={(value) => dispatch({
+            type: 'SET_FIELD',
+            field: parameter.name,
+            value
+          })}
+          error={formState.errors[parameter.name]}
+        />
+      ))}
+
+      <ActionList>
+        <ActionListItem>
+          <Button
+            variant="primary"
+            type="submit"
+            isDisabled={!isFormValid(formState) || isSubmitting}
+            isLoading={isSubmitting}
+          >
+            {isSubmitting ? 'Requesting...' : 'Request Service'}
+          </Button>
+        </ActionListItem>
+      </ActionList>
+    </Form>
+  );
+};
+```
+
+=== Data Management
+
+==== State Management Strategy
+The Catalog UI uses a hybrid approach for state management:
+
+```typescript
+// Server state with SWR
+const useCatalogItems = (namespace?: string) => {
+  const { data, error, mutate } = useSWR(
+    namespace ? apiPaths.CATALOG_ITEMS({ namespace }) : null,
+    fetcher,
+    {
+      refreshInterval: 30000,
+      revalidateOnFocus: true,
+      compare: compareK8sObjectsArr,
+    }
+  );
+
+  return {
+    catalogItems: data?.items || [],
+    isLoading: !data && !error,
+    error,
+    refresh: mutate,
+  };
+};
+
+// Client state with React hooks
+const useCatalogFilters = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const filters = useMemo(() => ({
+    search: searchParams.get('search') || '',
+    category: searchParams.get('category') || '',
+    labels: JSON.parse(searchParams.get('labels') || '{}'),
+  }), [searchParams]);
+
+  const updateFilters = useCallback((newFilters: Partial<CatalogFilters>) => {
+    const updatedParams = new URLSearchParams(searchParams);
+
+    Object.entries(newFilters).forEach(([key, value]) => {
+      if (value) {
+        updatedParams.set(key, typeof value === 'string' ? value : JSON.stringify(value));
+      } else {
+        updatedParams.delete(key);
+      }
+    });
+
+    setSearchParams(updatedParams);
+  }, [searchParams, setSearchParams]);
+
+  return { filters, updateFilters };
+};
+```
+
+==== API Integration
+Comprehensive API integration for all catalog operations:
+
+```typescript
+// Catalog API integration
+export const catalogApi = {
+  // Get catalog items
+  async getCatalogItems(namespace?: string): Promise<CatalogItem[]> {
+    const url = namespace
+      ? `/api/catalog/v1/namespaces/${namespace}/items`
+      : '/api/catalog/v1/items';
+
+    const response = await apiFetch(url);
+    return response.items;
+  },
+
+  // Create service request
+  async createServiceRequest(
+    catalogItem: CatalogItem,
+    parameters: ServiceRequestParameters
+  ): Promise<ServiceRequest> {
+    const response = await apiFetch(`/api/catalog/v1/requests`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        catalogItemName: catalogItem.metadata.name,
+        catalogItemNamespace: catalogItem.metadata.namespace,
+        parameters,
+      }),
+    });
+
+    return response;
+  },
+
+  // Create workshop
+  async createWorkshop(
+    catalogItem: CatalogItem,
+    workshopConfig: WorkshopConfiguration
+  ): Promise<Workshop> {
+    const response = await apiFetch('/api/catalog/v1/workshops', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        catalogItemName: catalogItem.metadata.name,
+        catalogItemNamespace: catalogItem.metadata.namespace,
+        ...workshopConfig,
+      }),
+    });
+
+    return response;
+  },
+};
+```
+
+=== User Interface Features
+
+==== Search and Filtering
+Advanced search and filtering capabilities:
+
+```typescript
+// Search implementation with Fuse.js
+const useSearchEngine = (catalogItems: CatalogItem[]) => {
+  const fuse = useMemo(() => new Fuse(catalogItems, {
+    keys: [
+      'spec.displayName',
+      'spec.description.content',
+      'spec.keywords',
+      'metadata.name',
+    ],
+    threshold: 0.3,
+    includeScore: true,
+  }), [catalogItems]);
+
+  const search = useCallback((query: string) => {
+    if (!query.trim()) return catalogItems;
+
+    const results = fuse.search(query);
+    return results.map(result => result.item);
+  }, [fuse, catalogItems]);
+
+  return { search };
+};
+
+// Filter implementation
+const filterCatalogItems = (
+  items: CatalogItem[],
+  filters: CatalogFilters
+): CatalogItem[] => {
+  return items.filter(item => {
+    // Category filter
+    if (filters.selectedCategory &&
+        item.spec.category !== filters.selectedCategory) {
+      return false;
+    }
+
+    // Label filters
+    for (const [labelKey, labelValues] of Object.entries(filters.selectedLabels)) {
+      const itemValue = item.metadata.labels?.[labelKey];
+      if (!itemValue || !labelValues.includes(itemValue)) {
+        return false;
+      }
+    }
+
+    // Access control
+    if (!checkAccessControl(item.spec.accessControl, filters.userGroups)) {
+      return false;
+    }
+
+    return true;
+  });
+};
+```
+
+==== Responsive Design
+Mobile-first responsive design with virtual scrolling:
+
+```typescript
+// Responsive grid implementation
+const CatalogGridList: React.FC<CatalogGridListProps> = ({
+  catalogItems,
+  wrapperRect,
+  view
+}) => {
+  const gridWidth = wrapperRect?.width || 1000;
+  const columnsSize = Math.floor(gridWidth / (GRID_COLUMN_WIDTH + GUTTER_SIZE));
+
+  // Virtual scrolling for performance
+  const Row = useCallback(({ index, style }) => (
+    <div style={style}>
+      <CatalogItemCard catalogItem={catalogItems[index]} />
+    </div>
+  ), [catalogItems]);
+
+  if (view === 'list') {
+    return (
+      <FixedSizeList
+        height={600}
+        itemCount={catalogItems.length}
+        itemSize={LIST_ROW_HEIGHT}
+        width="100%"
+      >
+        {Row}
+      </FixedSizeList>
+    );
+  }
+
+  // Grid view with responsive columns
+  return (
+    <FixedSizeGrid
+      columnCount={columnsSize}
+      columnWidth={GRID_COLUMN_WIDTH + GUTTER_SIZE}
+      height={600}
+      rowCount={Math.ceil(catalogItems.length / columnsSize)}
+      rowHeight={GRID_ROW_HEIGHT + GUTTER_SIZE}
+      width={gridWidth}
+    >
+      {GridCell}
+    </FixedSizeGrid>
+  );
+};
+```
+
+==== Real-Time Updates
+Live status updates for resources and workshops:
+
+```typescript
+// Real-time resource status
+const useResourceStatus = (resourceClaim: ResourceClaim) => {
+  const { data: status, error } = useSWR(
+    resourceClaim ?
+      `/api/poolboy/v1/namespaces/${resourceClaim.metadata.namespace}/resourceclaims/${resourceClaim.metadata.name}/status` :
+      null,
+    fetcher,
+    { refreshInterval: 5000 }
+  );
+
+  const provisioningState = useMemo(() => {
+    if (!status) return 'unknown';
+
+    const resources = status.resources || [];
+    const ready = resources.every(r => r.state?.phase === 'Ready');
+    const failed = resources.some(r => r.state?.phase === 'Failed');
+
+    if (failed) return 'failed';
+    if (ready) return 'ready';
+    return 'provisioning';
+  }, [status]);
+
+  return {
+    status,
+    provisioningState,
+    isLoading: !status && !error,
+    error,
+  };
+};
+```
+
+=== Workshop Interface
+
+==== Workshop Access Portal
+Specialized interface for workshop participants:
+
+```typescript
+const Workshop: React.FC<{ title: string }> = ({ title }) => {
+  const { workshopId } = useParams();
+  const [searchParams] = useSearchParams();
+  const userInterface = searchParams.get('userInterface') || 'rhpds';
+
+  const { data: workshop } = useSWRImmutable<WorkshopDetails>(
+    workshopId ? `/api/workshop/v1/workshops/${workshopId}` : null,
+    publicFetcher
+  );
+
+  const [workshopPrivateInfo, setWorkshopPrivateInfo] = useState(workshop);
+
+  const attemptLogin = async (email: string, accessPassword: string) => {
+    try {
+      const privateInfo = await workshopLogin({
+        accessPassword,
+        email,
+        workshopId,
+      });
+      setWorkshopPrivateInfo(privateInfo);
+    } catch (error) {
+      setLoginFailureMessage(error.message);
+    }
+  };
+
+  return (
+    <Page
+      header={<WorkshopHeader userInterface={userInterface} />}
+      className="workshop"
+    >
+      {workshopPrivateInfo.assignment ? (
+        <WorkshopContent workshop={workshopPrivateInfo} />
+      ) : (
+        <WorkshopLogin
+          onLogin={attemptLogin}
+          workshop={workshop}
+        />
+      )}
+    </Page>
+  );
+};
+```
+
+==== Lab Interface Integration
+Seamless integration with lab environments:
+
+```typescript
+// Lab interface access
+const WorkshopContent: React.FC<{ workshop: WorkshopDetails }> = ({ workshop }) => {
+  const assignment = workshop.assignment;
+  const labUrl = assignment.labUserInterfaceUrl;
+
+  useEffect(() => {
+    // Pre-load lab interface
+    if (labUrl) {
+      const link = document.createElement('link');
+      link.rel = 'prefetch';
+      link.href = labUrl;
+      document.head.appendChild(link);
+    }
+  }, [labUrl]);
+
+  return (
+    <PageSection variant="light">
+      <Card>
+        <CardHeader>
+          <Title headingLevel="h2">
+            {workshop.displayName}
+          </Title>
+        </CardHeader>
+        <CardBody>
+          <p>{workshop.description}</p>
+
+          {labUrl && (
+            <Button
+              component="a"
+              href={labUrl}
+              target="_blank"
+              variant="primary"
+              size="lg"
+            >
+              Access Lab Environment
+            </Button>
+          )}
+
+          <WorkshopResources assignment={assignment} />
+        </CardBody>
+      </Card>
+    </PageSection>
+  );
+};
+```
+
+=== Performance Optimization
+
+==== Lazy Loading and Code Splitting
+Optimized loading with route-based code splitting:
+
+```typescript
+// Route configuration with lazy loading
+const catalogRoutes = [
+  {
+    path: '/catalog/:namespace',
+    component: React.lazy(() => import('./Catalog/CatalogRedirections')),
+    title: 'Babylon | Catalog',
+  },
+  {
+    path: '/catalog/:namespace/order/:name',
+    component: React.lazy(() => import('./Catalog/CatalogItemForm')),
+    title: 'Babylon | Order Service',
+  },
+  {
+    path: '/services/:namespace/:name',
+    component: React.lazy(() => import('./Services/ServicesItem')),
+    title: 'Babylon | Service Details',
+  },
+  {
+    path: '/workshops/:namespace/:name',
+    component: React.lazy(() => import('./Workshops/WorkshopsItem')),
+    title: 'Babylon | Workshop Details',
+  },
+];
+```
+
+==== Caching Strategy
+Comprehensive caching for improved performance:
+
+```typescript
+// Multi-level caching strategy
+const cacheConfig = {
+  // SWR cache for API responses
+  swrCache: new Map(),
+
+  // Browser cache for static assets
+  browserCache: {
+    images: '1d',
+    scripts: '1w',
+    styles: '1d',
+  },
+
+  // Service worker cache for offline support
+  serviceWorkerCache: {
+    catalogItems: '5m',
+    userSession: '1h',
+    staticAssets: '1d',
+  },
+};
+```
+
+=== Accessibility and Internationalization
+
+==== Accessibility Features
+WCAG 2.1 AA compliant interface:
+
+```typescript
+// Accessible navigation
+const CatalogNavigation: React.FC = () => {
+  const { catalogItems } = useCatalogItems();
+  const [announceText, setAnnounceText] = useState('');
+
+  const handleSearch = (query: string) => {
+    const resultCount = filteredItems.length;
+    setAnnounceText(`Found ${resultCount} items matching "${query}"`);
+  };
+
+  return (
+    <>
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {announceText}
+      </div>
+
+      <nav role="navigation" aria-label="Catalog filters">
+        <SearchInput
+          aria-label="Search catalog items"
+          placeholder="Search services..."
+          onSearch={handleSearch}
+        />
+
+        <CategoryFilter
+          aria-label="Filter by category"
+          categories={availableCategories}
+          onSelect={handleCategorySelect}
+        />
+      </nav>
+    </>
+  );
+};
+```
+
+The Catalog UI provides a comprehensive, accessible, and performant interface for service discovery and provisioning, supporting both individual users and large workshop deployments while maintaining enterprise-grade usability and reliability standards.

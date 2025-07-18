@@ -1,0 +1,626 @@
+= User Interfaces
+
+== Overview
+
+The Babylon Platform provides modern, responsive web interfaces that enable different user personas to interact with the platform effectively. Built with React and TypeScript, these interfaces follow enterprise UX patterns and provide comprehensive functionality for catalog browsing, service management, and platform administration.
+
+== Interface Categories
+
+=== End User Interfaces
+* **link:catalog-ui.adoc[Catalog UI]**: Service catalog frontend for browsing and requesting resources
+* **link:workshop-ui.adoc[Workshop UI]**: Workshop participant interface for lab access and guidance
+* **link:status-ui.adoc[Status UI]**: System status and health information
+
+=== Administrative Interfaces
+* **link:admin-ui.adoc[Admin UI]**: Comprehensive administrative interface for platform operators
+* **link:workshop-manager-ui.adoc[Workshop Manager UI]**: Workshop orchestration and user management
+
+== UI Architecture Patterns
+
+=== Technology Stack
+
+==== Frontend Framework
+```javascript
+// Core technologies
+React 18+              // Component-based UI framework
+TypeScript 4.8+        // Type-safe JavaScript
+PatternFly 5          // Red Hat design system
+React Router 6        // Client-side routing
+SWR 2.0               // Data fetching and caching
+Redux Toolkit         // State management
+```
+
+==== Build and Development Tools
+```javascript
+// Development toolchain
+Webpack 5             // Module bundling
+Babel                 // JavaScript transpilation
+ESLint                // Code linting
+Prettier              // Code formatting
+Jest                  // Unit testing
+React Testing Library // Component testing
+```
+
+=== Component Architecture
+
+==== Container/Presentation Pattern
+All UIs follow the container/presentation component pattern:
+
+```typescript
+// Container Component - handles data and business logic
+const CatalogContainer: React.FC = () => {
+  const { data: catalogItems, error } = useSWR('/api/catalog/v1/items', fetcher);
+  const [selectedCategory, setSelectedCategory] = useState<string>('');
+
+  const filteredItems = useMemo(() =>
+    catalogItems?.filter(item =>
+      !selectedCategory || item.spec.category === selectedCategory
+    ), [catalogItems, selectedCategory]
+  );
+
+  return (
+    <CatalogPresentation
+      catalogItems={filteredItems}
+      selectedCategory={selectedCategory}
+      onCategoryChange={setSelectedCategory}
+      isLoading={!catalogItems && !error}
+      error={error}
+    />
+  );
+};
+
+// Presentation Component - pure UI rendering
+interface CatalogPresentationProps {
+  catalogItems: CatalogItem[];
+  selectedCategory: string;
+  onCategoryChange: (category: string) => void;
+  isLoading: boolean;
+  error?: Error;
+}
+
+const CatalogPresentation: React.FC<CatalogPresentationProps> = ({
+  catalogItems,
+  selectedCategory,
+  onCategoryChange,
+  isLoading,
+  error
+}) => {
+  if (isLoading) return <LoadingSection />;
+  if (error) return <ErrorSection error={error} />;
+
+  return (
+    <PageSection>
+      <CatalogFilters
+        selectedCategory={selectedCategory}
+        onCategoryChange={onCategoryChange}
+      />
+      <CatalogGrid catalogItems={catalogItems} />
+    </PageSection>
+  );
+};
+```
+
+==== Custom Hooks for Business Logic
+Reusable logic is extracted into custom hooks:
+
+```typescript
+// Custom hook for resource management
+const useResourceClaim = (namespace: string, name: string) => {
+  const { data, error, mutate } = useSWR(
+    `/api/poolboy/v1/namespaces/${namespace}/resourceclaims/${name}`,
+    fetcher,
+    { refreshInterval: 5000 }
+  );
+
+  const deleteResource = useCallback(async () => {
+    await deleteResourceClaim(namespace, name);
+    mutate();
+  }, [namespace, name, mutate]);
+
+  const extendLifespan = useCallback(async (hours: number) => {
+    await setLifespanEndForResourceClaim(namespace, name, hours);
+    mutate();
+  }, [namespace, name, mutate]);
+
+  return {
+    resourceClaim: data,
+    isLoading: !data && !error,
+    error,
+    deleteResource,
+    extendLifespan,
+    refresh: mutate
+  };
+};
+```
+
+=== Data Management
+
+==== SWR for Server State
+All interfaces use SWR for efficient server state management:
+
+```typescript
+// Global SWR configuration
+const swrConfig = {
+  refreshInterval: 30000,        // Auto-refresh every 30 seconds
+  revalidateOnFocus: true,       // Revalidate when window gains focus
+  revalidateOnReconnect: true,   // Revalidate on network reconnect
+  errorRetryCount: 3,            // Retry failed requests 3 times
+  compare: compareK8sObjects,    // Custom comparison for Kubernetes objects
+  onError: (error) => {
+    console.error('SWR Error:', error);
+    if (error.status === 401) {
+      // Handle authentication errors
+      window.location.href = '/login';
+    }
+  }
+};
+
+// Usage in components
+const { data: workshops, error, mutate } = useSWR(
+  `/api/babylon/v1/namespaces/${namespace}/workshops`,
+  fetcher,
+  swrConfig
+);
+```
+
+==== Redux for Client State
+Client-side state is managed with Redux Toolkit:
+
+```typescript
+// Session slice for user authentication state
+interface SessionState {
+  user: User | null;
+  isAuthenticated: boolean;
+  catalogNamespaces: CatalogNamespace[];
+  serviceNamespaces: ServiceNamespace[];
+  groups: string[];
+  isAdmin: boolean;
+}
+
+const sessionSlice = createSlice({
+  name: 'session',
+  initialState: {
+    user: null,
+    isAuthenticated: false,
+    catalogNamespaces: [],
+    serviceNamespaces: [],
+    groups: [],
+    isAdmin: false,
+  } as SessionState,
+  reducers: {
+    setSession: (state, action: PayloadAction<SessionState>) => {
+      return { ...state, ...action.payload };
+    },
+    clearSession: (state) => {
+      state.user = null;
+      state.isAuthenticated = false;
+      state.catalogNamespaces = [];
+      state.serviceNamespaces = [];
+      state.groups = [];
+      state.isAdmin = false;
+    },
+  },
+});
+```
+
+=== Styling and Theming
+
+==== PatternFly Integration
+All UIs use PatternFly components for consistent styling:
+
+```scss
+// Global styles with PatternFly variables
+@import '@patternfly/react-core/dist/styles/base.css';
+
+:root {
+  // Custom theme variables
+  --babylon-primary-color: #ee0000;
+  --babylon-secondary-color: #0066cc;
+  --babylon-success-color: #3e8635;
+  --babylon-warning-color: #f0ab00;
+  --babylon-danger-color: #c9190b;
+}
+
+// Component-specific styles
+.catalog__sidebar-panel {
+  min-width: 250px;
+  max-width: 300px;
+
+  .pf-v5-c-select {
+    width: 100%;
+  }
+}
+
+.admin-container {
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  flex-grow: 1;
+  background-color: #fff;
+}
+```
+
+==== Responsive Design
+All interfaces are designed for multiple screen sizes:
+
+```scss
+// Mobile-first responsive design
+.catalog__content-box {
+  padding: var(--pf-v5-global--spacer--md);
+
+  @media (min-width: 768px) {
+    padding: var(--pf-v5-global--spacer--lg);
+  }
+
+  @media (min-width: 1200px) {
+    padding: var(--pf-v5-global--spacer--xl);
+  }
+}
+
+.catalog__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--pf-v5-global--spacer--md);
+
+  @media (min-width: 1400px) {
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  }
+}
+```
+
+=== Accessibility
+
+==== WCAG 2.1 AA Compliance
+All interfaces follow accessibility best practices:
+
+```typescript
+// Accessible component example
+const CatalogItemCard: React.FC<{ catalogItem: CatalogItem }> = ({ catalogItem }) => {
+  return (
+    <Card
+      isSelectable
+      isSelected={isSelected}
+      onClick={handleClick}
+      onKeyPress={handleKeyPress}
+      tabIndex={0}
+      role="button"
+      aria-label={`Request ${catalogItem.spec.displayName}`}
+      aria-describedby={`${catalogItem.metadata.name}-description`}
+    >
+      <CardHeader>
+        <img
+          src={catalogItem.spec.icon?.url}
+          alt={catalogItem.spec.icon?.alt || `${catalogItem.spec.displayName} icon`}
+          aria-hidden={!catalogItem.spec.icon?.alt}
+        />
+        <Title headingLevel="h3" size="md">
+          {catalogItem.spec.displayName}
+        </Title>
+      </CardHeader>
+      <CardBody>
+        <p id={`${catalogItem.metadata.name}-description`}>
+          {catalogItem.spec.description}
+        </p>
+      </CardBody>
+    </Card>
+  );
+};
+```
+
+==== Keyboard Navigation
+Full keyboard navigation support:
+
+```typescript
+// Keyboard navigation hook
+const useKeyboardNavigation = (items: any[], onSelect: (item: any) => void) => {
+  const [focusedIndex, setFocusedIndex] = useState(0);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      switch (event.key) {
+        case 'ArrowDown':
+          event.preventDefault();
+          setFocusedIndex(prev =>
+            prev < items.length - 1 ? prev + 1 : prev
+          );
+          break;
+        case 'ArrowUp':
+          event.preventDefault();
+          setFocusedIndex(prev => prev > 0 ? prev - 1 : prev);
+          break;
+        case 'Enter':
+          event.preventDefault();
+          if (items[focusedIndex]) {
+            onSelect(items[focusedIndex]);
+          }
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [items, focusedIndex, onSelect]);
+
+  return focusedIndex;
+};
+```
+
+=== Performance Optimization
+
+==== Code Splitting and Lazy Loading
+All routes are lazy-loaded for optimal performance:
+
+```typescript
+// Route-based code splitting
+const Dashboard = React.lazy(() => import('@app/Dashboard'));
+const Catalog = React.lazy(() => import('@app/Catalog/Catalog'));
+const AdminInterface = React.lazy(() => import('@app/Admin/AdminInterface'));
+
+const Routes: React.FC = () => {
+  return (
+    <Routes>
+      <Route
+        path="/"
+        element={
+          <Suspense fallback={<LoadingSection />}>
+            <Dashboard />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/catalog/*"
+        element={
+          <Suspense fallback={<LoadingSection />}>
+            <Catalog />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/admin/*"
+        element={
+          <Suspense fallback={<LoadingSection />}>
+            <AdminInterface />
+          </Suspense>
+        }
+      />
+    </Routes>
+  );
+};
+```
+
+==== Virtual Scrolling for Large Lists
+Large data sets use virtual scrolling:
+
+```typescript
+// Virtual scrolling for resource lists
+import { FixedSizeList as List } from 'react-window';
+
+const VirtualizedResourceList: React.FC<{ resources: Resource[] }> = ({ resources }) => {
+  const Row = ({ index, style }: { index: number; style: CSSProperties }) => (
+    <div style={style}>
+      <ResourceListItem resource={resources[index]} />
+    </div>
+  );
+
+  return (
+    <List
+      height={600}
+      itemCount={resources.length}
+      itemSize={80}
+      width="100%"
+    >
+      {Row}
+    </List>
+  );
+};
+```
+
+==== Memoization and Performance Hooks
+Performance-critical components use memoization:
+
+```typescript
+// Memoized component for expensive rendering
+const CatalogItemGrid = React.memo<{
+  catalogItems: CatalogItem[];
+  onSelect: (item: CatalogItem) => void;
+}>(({ catalogItems, onSelect }) => {
+  const memoizedItems = useMemo(() =>
+    catalogItems.map(item => ({
+      ...item,
+      displayName: item.spec.displayName || item.metadata.name
+    })), [catalogItems]
+  );
+
+  return (
+    <div className="catalog__grid">
+      {memoizedItems.map(item => (
+        <CatalogItemCard
+          key={item.metadata.uid}
+          catalogItem={item}
+          onSelect={onSelect}
+        />
+      ))}
+    </div>
+  );
+});
+```
+
+=== Error Handling
+
+==== Error Boundaries
+Comprehensive error handling with error boundaries:
+
+```typescript
+// Error boundary for graceful error handling
+class UIErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error?: Error }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('UI Error Boundary caught an error:', error, errorInfo);
+
+    // Report to monitoring service
+    if (window.newrelic) {
+      window.newrelic.noticeError(error);
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <EmptyState variant="full">
+          <EmptyStateHeader
+            titleText="Something went wrong"
+            icon={<EmptyStateIcon icon={ExclamationTriangleIcon} />}
+          />
+          <EmptyStateBody>
+            An unexpected error occurred. Please refresh the page or contact support.
+          </EmptyStateBody>
+          <EmptyStateFooter>
+            <Button variant="primary" onClick={() => window.location.reload()}>
+              Refresh Page
+            </Button>
+          </EmptyStateFooter>
+        </EmptyState>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+```
+
+==== Loading States and Skeleton Screens
+Consistent loading experiences:
+
+```typescript
+// Loading skeleton component
+const CatalogItemSkeleton: React.FC = () => (
+  <Card>
+    <CardHeader>
+      <Skeleton shape="square" width="48px" height="48px" />
+      <Skeleton width="60%" />
+    </CardHeader>
+    <CardBody>
+      <Skeleton width="100%" />
+      <Skeleton width="80%" />
+      <Skeleton width="90%" />
+    </CardBody>
+  </Card>
+);
+
+// Usage in loading states
+const CatalogGrid: React.FC = () => {
+  const { data: catalogItems, isLoading } = useCatalogItems();
+
+  if (isLoading) {
+    return (
+      <div className="catalog__grid">
+        {Array.from({ length: 12 }, (_, i) => (
+          <CatalogItemSkeleton key={i} />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="catalog__grid">
+      {catalogItems.map(item => (
+        <CatalogItemCard key={item.metadata.uid} catalogItem={item} />
+      ))}
+    </div>
+  );
+};
+```
+
+=== Testing Strategy
+
+==== Unit Testing with Jest and React Testing Library
+Comprehensive test coverage for all components:
+
+```typescript
+// Component test example
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { CatalogItemCard } from './CatalogItemCard';
+
+describe('CatalogItemCard', () => {
+  const mockCatalogItem = {
+    metadata: { name: 'test-item', uid: '123' },
+    spec: {
+      displayName: 'Test Item',
+      description: 'Test description',
+      category: 'workshops'
+    }
+  };
+
+  it('renders catalog item information', () => {
+    render(<CatalogItemCard catalogItem={mockCatalogItem} />);
+
+    expect(screen.getByText('Test Item')).toBeInTheDocument();
+    expect(screen.getByText('Test description')).toBeInTheDocument();
+  });
+
+  it('calls onSelect when clicked', async () => {
+    const mockOnSelect = jest.fn();
+    render(
+      <CatalogItemCard
+        catalogItem={mockCatalogItem}
+        onSelect={mockOnSelect}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button'));
+
+    await waitFor(() => {
+      expect(mockOnSelect).toHaveBeenCalledWith(mockCatalogItem);
+    });
+  });
+});
+```
+
+==== Integration Testing
+End-to-end testing with Cypress:
+
+```typescript
+// Cypress integration test
+describe('Catalog Workflow', () => {
+  beforeEach(() => {
+    cy.login('test-user');
+    cy.visit('/catalog');
+  });
+
+  it('allows users to browse and request catalog items', () => {
+    // Browse catalog
+    cy.get('[data-testid="catalog-grid"]').should('be.visible');
+    cy.get('[data-testid="catalog-item"]').should('have.length.greaterThan', 0);
+
+    // Filter by category
+    cy.get('[data-testid="category-filter"]').click();
+    cy.get('[data-testid="category-workshops"]').click();
+    cy.get('[data-testid="catalog-item"]').should('contain.text', 'Workshop');
+
+    // Request service
+    cy.get('[data-testid="catalog-item"]').first().click();
+    cy.get('[data-testid="request-button"]').click();
+    cy.get('[data-testid="order-form"]').should('be.visible');
+
+    // Fill form and submit
+    cy.get('[name="user_count"]').type('1');
+    cy.get('[data-testid="submit-order"]').click();
+
+    // Verify success
+    cy.get('[data-testid="order-success"]').should('be.visible');
+  });
+});
+```
+
+The Babylon Platform UIs provide a comprehensive, accessible, and performant interface for all platform capabilities, following modern web development best practices and enterprise UX patterns.
